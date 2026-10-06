@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "start": "node server.js",
+    "db:schema": "node db/apply-schema.js",
+    "db:seed": "node db/seed.js",
+    "db:reset": "node db/seed.js --reset",
+    "db:inspect": "node db/inspect.js",
+    "test": "node test/api.test.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  }
+}

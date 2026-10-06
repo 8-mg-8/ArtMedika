@@ -1,0 +1,127 @@
+-- Скрипт для ручной проверки/заполнения БД.
+-- Идемпотентный: можно запускать повторно.
+-- Схема одинакова с server/db/schema.sql,
+-- данные одинаковы с server/data/dataPriceYslyga.js.
+
+-- ===================== СХЕМА =====================
+CREATE TABLE IF NOT EXISTS medical_services (
+    code_nomenclature  VARCHAR(20)  NOT NULL,
+    code_mis           VARCHAR(20)  NOT NULL,
+    service_name       TEXT         NOT NULL,
+    service_type       VARCHAR(20)  NOT NULL,
+    duration_text      VARCHAR(50),
+    duration_min       INT,
+    price_rub          NUMERIC(12, 2),
+    price_category_i   NUMERIC(12, 2),
+    price_category_ii  NUMERIC(12, 2),
+    price_category_iii NUMERIC(12, 2),
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (code_nomenclature, code_mis)
+);
+
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS service_type      VARCHAR(20) NOT NULL DEFAULT 'consultation';
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS duration_text     VARCHAR(50);
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS duration_min      INT;
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS price_rub         NUMERIC(12, 2);
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS price_category_i  NUMERIC(12, 2);
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS price_category_ii NUMERIC(12, 2);
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS price_category_iii NUMERIC(12, 2);
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE medical_services ADD COLUMN IF NOT EXISTS updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE medical_services DROP CONSTRAINT IF EXISTS medical_services_type_check;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM medical_services WHERE service_type NOT IN ('consultation', 'surgery')) THEN
+    RAISE EXCEPTION 'В medical_services есть строки с недопустимым service_type — исправьте их перед добавлением CHECK';
+  END IF;
+
+  ALTER TABLE medical_services
+    ADD CONSTRAINT medical_services_type_check CHECK (service_type IN ('consultation', 'surgery'));
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS medical_services_type_idx ON medical_services (service_type);
+CREATE INDEX IF NOT EXISTS medical_services_code_mis_idx ON medical_services (code_mis);
+
+CREATE OR REPLACE FUNCTION medical_services_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'medical_services_updated_at' AND tgrelid = 'medical_services'::regclass
+  ) THEN
+    CREATE TRIGGER medical_services_updated_at
+    BEFORE UPDATE ON medical_services
+    FOR EACH ROW EXECUTE FUNCTION medical_services_set_updated_at();
+  END IF;
+END;
+$$;
+
+-- ===================== ДАННЫЕ =====================
+-- Консультации: duration_text + price_rub
+INSERT INTO medical_services (
+    code_nomenclature, code_mis, service_type, service_name,
+    duration_text, duration_min, price_rub,
+    price_category_i, price_category_ii, price_category_iii
+) VALUES
+('B01.057.003', '3.2.1', 'consultation',
+ 'Первичная консультация пластического хирурга. Прием пациента, сбор анамнеза заболевания, объективный осмотр, определение необходимого объема обследования, выбор концепции ведения и лечения пациента, разъяснение пациенту информации о заболевании, ведение медицинской документации.',
+ 'до 40', NULL, 2500, NULL, NULL, NULL),
+('B01.057.004', '3.2.2', 'consultation',
+ 'Повторная консультация пластического хирурга. Прием пациента, разъяснение пациенту информации о результатах обследования, объективный осмотр, краткое разъяснение пациенту информации о заболевании, возможных методах и этапах лечения.',
+ '30', NULL, 2500, NULL, NULL, NULL),
+('B01.057.004', '3.2.3', 'consultation',
+ 'Осмотр после лечения в течение 1 месяца',
+ 'до 10', NULL, 0, NULL, NULL, NULL)
+ON CONFLICT (code_nomenclature, code_mis) DO UPDATE SET
+    service_name       = EXCLUDED.service_name,
+    service_type       = EXCLUDED.service_type,
+    duration_text      = EXCLUDED.duration_text,
+    duration_min       = EXCLUDED.duration_min,
+    price_rub          = EXCLUDED.price_rub,
+    price_category_i   = EXCLUDED.price_category_i,
+    price_category_ii  = EXCLUDED.price_category_ii,
+    price_category_iii = EXCLUDED.price_category_iii;
+
+-- Операции: duration_min + цены по категориям сложности
+INSERT INTO medical_services (
+    code_nomenclature, code_mis, service_type, service_name,
+    duration_text, duration_min, price_rub,
+    price_category_i, price_category_ii, price_category_iii
+) VALUES
+('A16.20.085', '3.2.4.1', 'surgery',
+ 'Увеличение молочной железы (маммопластика) (без стоимости имплантов)',
+ NULL, 120, NULL, 112000, 137000, 147000),
+('A16.20.085', '3.2.4.2', 'surgery',
+ 'Увеличение молочной железы (маммопластика) с коррекцией ареол (без стоимости имплантов)',
+ NULL, 90, NULL, 127000, 147000, 162000),
+('A16.20.085', '3.2.4.3', 'surgery',
+ 'Редукционная (уменьшение) пластика молочной железы',
+ NULL, 120, NULL, 140000, 165000, 240000),
+('A16.20.085', '3.2.4.4', 'surgery',
+ 'Вертикальная т-образная мастопексия (подтяжка молочной железы)',
+ NULL, 120, NULL, 130000, 150000, 200000)
+ON CONFLICT (code_nomenclature, code_mis) DO UPDATE SET
+    service_name       = EXCLUDED.service_name,
+    service_type       = EXCLUDED.service_type,
+    duration_text      = EXCLUDED.duration_text,
+    duration_min       = EXCLUDED.duration_min,
+    price_rub          = EXCLUDED.price_rub,
+    price_category_i   = EXCLUDED.price_category_i,
+    price_category_ii  = EXCLUDED.price_category_ii,
+    price_category_iii = EXCLUDED.price_category_iii;
+
+-- Проверка результата
+SELECT code_nomenclature, code_mis, service_type, duration_text, duration_min,
+       price_rub, price_category_i, price_category_ii, price_category_iii
+FROM medical_services
+ORDER BY service_type, code_mis;
