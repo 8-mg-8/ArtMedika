@@ -1,3 +1,4 @@
+/* блок 1 */
 .block-1 {
     width: 100%;
     height: 901px;
@@ -95,4 +96,53 @@
         rgba(29, 41, 61, 0.25) 70% 
     );
     z-index: 1; 
+}
+/* блок 2 будет потом */
+
+/* блок 3 */
+.block-3-title{
+    display: flex;
+    flex-direction: column;
+    line-height: 0px;
+    max-width: 1138px;
+    margin: 0 auto;
+}
+.block-3-content{
+    display: flex;
+    gap: 20px;
+    padding: 52px 100px;
+}
+.block-3-right{
+    max-width: 925px;
+}
+.block-3-right-text-brown{
+    color: #37241B;
+    font-size: 28px;
+}
+.block-3-right-text-black{
+    color: #212529;
+    font-size: 28px;
+}
+.block-3-right-kubiki{
+    display: flex;
+    flex-direction: row;
+    gap: 21px;
+    margin-top: 70px;
+}
+.block-3-right-kubik{
+    background-color: #F4F7FF;
+    border: none;
+    border-radius: 13px;
+    max-height: 228px;
+    padding: 25px;
+    max-width: 251px;
+}
+.block-3-right-kubik h4{
+    margin: 0;
+    font-size: 64px;
+    color: #37241B;
+}
+.block-3-right-kubik p{
+    font-size: 24px;
+    color: #37241B;
 }
