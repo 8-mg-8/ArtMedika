@@ -125,3 +125,8 @@ SELECT code_nomenclature, code_mis, service_type, duration_text, duration_min,
        price_rub, price_category_i, price_category_ii, price_category_iii
 FROM medical_services
 ORDER BY service_type, code_mis;
+
+
+
+
+
