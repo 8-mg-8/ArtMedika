@@ -1,15 +1,17 @@
 {
+  "name": "art-medica-server",
+  "version": "1.0.0",
+  "private": true,
   "scripts": {
     "start": "node server.js",
     "db:schema": "node db/apply-schema.js",
-    "db:seed": "node db/seed.js",
-    "db:reset": "node db/seed.js --reset",
-    "db:inspect": "node db/inspect.js",
+    "db:reset": "node db/apply-schema.js",
     "test": "node test/api.test.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "multer": "^2.0.2",
     "pg": "^8.23.0"
   }
 }

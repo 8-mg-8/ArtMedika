@@ -1,23 +1,28 @@
-const express = require("express");
-const cors = require("cors");
-const routs = require("./roust/routs.js");
+const path = require('path');
+const express = require('express');
+const cors = require('cors');
+const routs = require('./roust/routs.js');
 
 const app = express();
-const port = 1488;
+const port = process.env.PORT || 1488;
 
-// ✅ ПРАВИЛЬНЫЙ ПОРЯДОК:
-// 1. Сначала CORS
-app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+  }),
+);
 
-// 2. ОБЯЗАТЕЛЬНО: парсинг JSON — ДО роутов!
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
-// 3. Только потом роуты
-app.use("/", routs);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.use('/', routs);
+
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: `Эндпоинт не найден: ${req.method} ${req.originalUrl}` });
+});
 
 app.listen(port, () => {
-  console.log(`✅ Сервер запущен на http://localhost:${port}`);
+  console.log(`Сервер запущен на http://localhost:${port}`);
 });

@@ -1,7 +1,7 @@
-const ADMIN_TOKEN = 'admin-secret-token';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'admin-secret-token';
 
 function issueToken(login) {
-  return `${Buffer.from(`${login}:${ADMIN_TOKEN}`).toString('base64')}`;
+  return Buffer.from(`${login}:${ADMIN_TOKEN}`).toString('base64');
 }
 
 function isValidToken(token) {
