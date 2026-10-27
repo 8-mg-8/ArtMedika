@@ -6,15 +6,25 @@ import styles from '@/app/dashboard.module.css';
 
 export type Row = Record<string, unknown>;
 
+export type FieldOption = { value: number | string; label: string };
+
 export type FieldConfig = {
   name: string;
   label: string;
   type: 'text' | 'textarea' | 'number' | 'date' | 'year' | 'bool' | 'select' | 'file' | 'json';
   required?: boolean;
   folder?: string;
-  options?: { value: number | string; label: string }[];
-  optionsLoad?: () => Promise<{ value: number | string; label: string }[]>;
+  options?: FieldOption[];
+  optionsLoad?: () => Promise<FieldOption[]>;
   wide?: boolean;
+  action?: {
+    label: string;
+    onClick: (context: {
+      form: Row;
+      row: Row | null;
+      setValue: (name: string, value: unknown) => void;
+    }) => void | Promise<void>;
+  };
 };
 
 export type ColumnConfig = {
@@ -24,11 +34,21 @@ export type ColumnConfig = {
 };
 
 export type CrudApi = {
-  list: (params?: Record<string, string | number | boolean | undefined>) => Promise<{ data: Row[]; count?: number }>;
+  list: (
+    params?: Record<string, string | number | boolean | undefined>
+  ) => Promise<{
+    data: Row[];
+    count?: number;
+    sort?: string | null;
+    sort_options?: SortOption[];
+  }>;
+  get?: (id: number) => Promise<Row>;
   create: (body: Record<string, unknown>) => Promise<unknown>;
   update: (id: number, body: Record<string, unknown>) => Promise<unknown>;
   remove: (id: number) => Promise<unknown>;
 };
+
+type SortOption = { key: string; label: string };
 
 type CrudProps = {
   api: CrudApi;
@@ -46,11 +66,61 @@ function boolVal(v: unknown): boolean {
   return v === true || v === 1 || v === '1' || v === 't' || v === 'true';
 }
 
+function FileHint({ value }: { value: string }) {
+  if (!value) return null;
+  const name = value.split('/').pop() || value;
+  if (/\.(png|jpe?g|webp|gif|avif|svg)$/i.test(value)) {
+    return (
+      <span className={`${styles.muted} ${styles.fileHint}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/${value}`} alt={name} className={styles.thumb} loading="lazy" />
+        {name}
+      </span>
+    );
+  }
+  return <span className={styles.muted}>{name}</span>;
+}
+
+function useSelectOptions(fields: FieldConfig[]) {
+  const [loaded, setLoaded] = useState<Record<string, FieldOption[]>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    for (const field of fields) {
+      if (field.type !== 'select' || field.options || !field.optionsLoad) continue;
+      field.optionsLoad()
+        .then((options) => {
+          if (!cancelled) setLoaded((prev) => ({ ...prev, [field.name]: options }));
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fields]);
+
+  return loaded;
+}
+
 function initialForm(fields: FieldConfig[], defaults?: Record<string, unknown>): Row {
   const f: Row = {};
   for (const field of fields) {
     const d = defaults?.[field.name];
     f[field.name] = d !== undefined ? d : field.type === 'bool' ? false : '';
+  }
+  return f;
+}
+
+function formFromRow(fields: FieldConfig[], defaults: Record<string, unknown> | undefined, row: Row): Row {
+  const f = initialForm(fields, defaults);
+  for (const field of fields) {
+    const v = row[field.name];
+    if (v === undefined || v === null) continue;
+    if (field.type === 'bool') f[field.name] = boolVal(v);
+    else if (field.type === 'json') f[field.name] = JSON.stringify(v, null, 2);
+    else f[field.name] = v;
   }
   return f;
 }
@@ -73,13 +143,24 @@ export function Crud({
   const [editing, setEditing] = useState<Row | null>(null);
   const [form, setForm] = useState<Row>(() => initialForm(fields, defaults));
   const [saving, setSaving] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [sort, setSort] = useState('');
+  const [sortOptions, setSortOptions] = useState<SortOption[]>([]);
+
+  const loadedOptions = useSelectOptions(fields);
 
   const load = useCallback(
-    async (q?: string) => {
+    async (q?: string, sortKey?: string) => {
       try {
-        const res = await api.list(q ? { search: q } : {});
+        const params: Record<string, string> = {};
+        if (q) params.search = q;
+        if (sortKey) params.sort = sortKey;
+        const res = await api.list(params);
         setRows(res.data ?? []);
+        const options = res.sort_options ?? [];
+        setSortOptions(options);
+        setSort((prev) => prev || res.sort || options[0]?.key || '');
         setError('');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Ошибка загрузки');
@@ -89,9 +170,9 @@ export function Crud({
   );
 
   useEffect(() => {
-    const timer = setTimeout(load, 0);
+    const timer = setTimeout(() => load(search, sort), 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [load, search, sort]);
 
   const openCreate = () => {
     setEditing(null);
@@ -99,16 +180,17 @@ export function Crud({
     setShowForm(true);
   };
 
-  const openEdit = (row: Row) => {
-    setEditing(row);
-    const f = initialForm(fields, defaults);
-    for (const field of fields) {
-      const v = row[field.name];
-      if (v === undefined || v === null) continue;
-      if (field.type === 'bool') f[field.name] = boolVal(v);
-      else if (field.type === 'json') f[field.name] = JSON.stringify(v, null, 2);
-      else f[field.name] = v;
+  const openEdit = async (row: Row) => {
+    let source = row;
+    if (api.get && typeof row.id === 'number') {
+      try {
+        source = { ...row, ...(await api.get(row.id)) };
+      } catch {
+        source = row;
+      }
     }
+    setEditing(source);
+    setForm(formFromRow(fields, defaults, source));
     setShowForm(true);
   };
 
@@ -150,7 +232,7 @@ export function Crud({
         await api.create(body);
       }
       closeForm();
-      load(search);
+      load(search, sort);
     } catch (e2) {
       setError(e2 instanceof Error ? e2.message : 'Ошибка сохранения');
     } finally {
@@ -162,7 +244,7 @@ export function Crud({
     if (!confirm('Удалить запись?')) return;
     try {
       await api.remove(row.id as number);
-      load(search);
+      load(search, sort);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка удаления');
     }
@@ -170,6 +252,19 @@ export function Crud({
 
   const setField = (name: string, value: unknown) =>
     setForm((prev) => ({ ...prev, [name]: value }));
+
+  const runFieldAction = async (field: FieldConfig) => {
+    if (!field.action) return;
+    setActionBusy(field.name);
+    setError('');
+    try {
+      await field.action.onClick({ form, row: editing, setValue: setField });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Ошибка выполнения действия');
+    } finally {
+      setActionBusy(null);
+    }
+  };
 
   const onFile = async (field: FieldConfig, file: File | undefined) => {
     if (!file) return;
@@ -194,9 +289,22 @@ export function Crud({
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
-            load(e.target.value);
           }}
         />
+        {sortOptions.length > 0 ? (
+          <select
+            className={styles.sortSelect}
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            title="Сортировка"
+          >
+            {sortOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <button type="button" className={`${styles.btnPrimary} ${compact ? styles.btnSmall : ''}`} onClick={openCreate}>
           Добавить
         </button>
@@ -240,7 +348,7 @@ export function Crud({
                     />
                     Да
                   </label>
-                ) : field.type === 'select' && field.options ? (
+                ) : field.type === 'select' ? (
                   <select
                     id={`f-${field.name}`}
                     value={String(form[field.name] ?? '')}
@@ -248,7 +356,7 @@ export function Crud({
                     required={field.required}
                   >
                     <option value="">—</option>
-                    {field.options.map((o) => (
+                    {(field.options ?? loadedOptions[field.name] ?? []).map((o) => (
                       <option key={String(o.value)} value={String(o.value)}>
                         {o.label}
                       </option>
@@ -262,12 +370,7 @@ export function Crud({
                       accept="image/*,.pdf"
                       onChange={(e) => onFile(field, e.target.files?.[0])}
                     />
-                    <input
-                      type="text"
-                      value={String(form[field.name] ?? '')}
-                      onChange={(e) => setField(field.name, e.target.value)}
-                      placeholder="путь к файлу"
-                    />
+                    <FileHint value={String(form[field.name] ?? '')} />
                   </div>
                 ) : (
                   <input
@@ -279,6 +382,19 @@ export function Crud({
                     step="any"
                   />
                 )}
+                {field.action ? (
+                  <div className={styles.fieldAction}>
+                    <button
+                      type="button"
+                      className={`${styles.btnOutline} ${styles.btnSmall}`}
+                      onClick={() => runFieldAction(field)}
+                      disabled={!editing || actionBusy === field.name}
+                      title={!editing ? 'Сначала сохраните запись' : undefined}
+                    >
+                      {actionBusy === field.name ? 'Заполнение...' : field.action.label}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -314,7 +430,7 @@ export function Crud({
                     {columns.map((c) => (
                       <td key={c.key}>{c.render ? c.render(row) : String(row[c.key] ?? '')}</td>
                     ))}
-                    <td className={styles.rowActions}>
+                    <td className={`${styles.rowActions} ${details ? styles.rowActionsWithDetails : ''}`}>
                       <button
                         type="button"
                         className={`${styles.btnOutline} ${styles.btnSmall}`}
@@ -387,16 +503,23 @@ export function ChildCrud({
   const [editing, setEditing] = useState<Row | null>(null);
   const [form, setForm] = useState<Row>(() => initialForm(fields, defaults));
   const [saving, setSaving] = useState(false);
+  const [sort, setSort] = useState('');
+  const [sortOptions, setSortOptions] = useState<SortOption[]>([]);
+
+  const loadedOptions = useSelectOptions(fields);
 
   const load = useCallback(async () => {
     try {
-      const res = await api.list();
+      const res = await api.list(sort ? { sort } : {});
       setRows(res.data ?? []);
+      const options = res.sort_options ?? [];
+      setSortOptions(options);
+      setSort((prev) => prev || res.sort || options[0]?.key || '');
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Ошибка загрузки');
     }
-  }, [api]);
+  }, [api, sort]);
 
   useEffect(() => {
     const timer = setTimeout(load, 0);
@@ -409,17 +532,17 @@ export function ChildCrud({
     setShowForm(true);
   };
 
-  const openEdit = (row: Row) => {
-    setEditing(row);
-    const f = initialForm(fields, defaults);
-    for (const field of fields) {
-      const v = row[field.name];
-      if (v === undefined || v === null) continue;
-      if (field.type === 'bool') f[field.name] = boolVal(v);
-      else if (field.type === 'json') f[field.name] = JSON.stringify(v, null, 2);
-      else f[field.name] = v;
+  const openEdit = async (row: Row) => {
+    let source = row;
+    if (api.get && typeof row.id === 'number') {
+      try {
+        source = { ...row, ...(await api.get(row.id)) };
+      } catch {
+        source = row;
+      }
     }
-    setForm(f);
+    setEditing(source);
+    setForm(formFromRow(fields, defaults, source));
     setShowForm(true);
   };
 
@@ -493,6 +616,20 @@ export function ChildCrud({
       <div className={styles.childHeader}>
         <strong>{label}</strong>
         <span className={styles.muted}>({rows.length})</span>
+        {sortOptions.length > 0 ? (
+          <select
+            className={styles.sortSelect}
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            title="Сортировка"
+          >
+            {sortOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <button type="button" className={`${styles.btnSuccess} ${styles.btnSmall}`} onClick={openCreate}>
           + Добавить
         </button>
@@ -534,14 +671,14 @@ export function ChildCrud({
                     />
                     Да
                   </label>
-                ) : field.type === 'select' && field.options ? (
+                ) : field.type === 'select' ? (
                   <select
                     value={String(form[field.name] ?? '')}
                     onChange={(e) => setField(field.name, e.target.value)}
                     required={field.required}
                   >
                     <option value="">—</option>
-                    {field.options.map((o) => (
+                    {(field.options ?? loadedOptions[field.name] ?? []).map((o) => (
                       <option key={String(o.value)} value={String(o.value)}>{o.label}</option>
                     ))}
                   </select>
@@ -552,12 +689,7 @@ export function ChildCrud({
                       accept="image/*,.pdf"
                       onChange={(e) => onFile(field, e.target.files?.[0])}
                     />
-                    <input
-                      type="text"
-                      value={String(form[field.name] ?? '')}
-                      onChange={(e) => setField(field.name, e.target.value)}
-                      placeholder="путь к файлу"
-                    />
+                    <FileHint value={String(form[field.name] ?? '')} />
                   </div>
                 ) : (
                   <input
@@ -600,7 +732,7 @@ export function ChildCrud({
                   {columns.map((c) => (
                     <td key={c.key}>{c.render ? c.render(row) : String(row[c.key] ?? '')}</td>
                   ))}
-                  <td className={styles.rowActions}>
+                  <td className={styles.rowActionsChild}>
                     <button type="button" className={`${styles.btnOutline} ${styles.btnSmall}`} onClick={() => openEdit(row)}>
                       Изм.
                     </button>

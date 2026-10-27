@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 
-const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
+const SCHEMA_FILE = path.join(__dirname, '..', '..', 'chek.text');
 
 const connectionOptions = {
   user: process.env.PGUSER || 'postgres',
@@ -27,13 +27,29 @@ async function ensureDatabase() {
   }
 }
 
+async function dropPublicObjects(client) {
+  await client.query(`
+    DO $$
+    DECLARE r RECORD;
+    BEGIN
+      FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+        EXECUTE format('DROP TABLE IF EXISTS public.%I CASCADE', r.tablename);
+      END LOOP;
+      FOR r IN (SELECT viewname FROM pg_views WHERE schemaname = 'public') LOOP
+        EXECUTE format('DROP VIEW IF EXISTS public.%I CASCADE', r.viewname);
+      END LOOP;
+    END $$;
+  `);
+}
+
 async function applySchema() {
   const client = new Client({ ...connectionOptions, database: DB_NAME });
   await client.connect();
   try {
+    await dropPublicObjects(client);
     const schema = fs.readFileSync(SCHEMA_FILE, 'utf8');
     await client.query(schema);
-    console.log(`Схема применена к базе ${DB_NAME}: таблицы, данные и представления.`);
+    console.log(`Схема (${SCHEMA_FILE}) применена к базе ${DB_NAME}: таблицы, данные и представления.`);
   } finally {
     await client.end();
   }

@@ -1,4 +1,18 @@
+-- ============================================================
+-- СХЕМА БД «АРТ-МЕДИКА» — PostgreSQL
+-- Структура:
+--   1. Услуги (разделы → подразделы → конкретные услуги + дочерние таблицы)
+--   2. Акции
+--   3. Проекты (+ 8 связанных таблиц)
+--   4. Цены на услуги (НЕ ИЗМЕНЯЕТСЯ)
+--   5. Новости
+--   6. Специалисты (+ 6 связанных таблиц)
+-- ============================================================
 
+
+-- ============================================================
+-- ФУНКЦИИ
+-- ============================================================
 
 CREATE OR REPLACE FUNCTION fn_update_updated_at()
 RETURNS TRIGGER AS $$
@@ -18,61 +32,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION fn_recalc_reviews_percent()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_specialist_id INTEGER;
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_specialist_id := OLD.specialist_id;
-    ELSE
-        v_specialist_id := NEW.specialist_id;
-    END IF;
-
-    UPDATE specialists
-    SET positive_reviews_percent = (
-        SELECT ROUND(SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*), 0) * 100, 1)::integer
-        FROM specialist_reviews
-        WHERE specialist_id = v_specialist_id AND is_active = true
-    )
-    WHERE id = v_specialist_id;
-
-    IF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 
 -- ============================================================
 -- РАЗДЕЛ 0: ВСПОМОГАТЕЛЬНЫЕ ТАБЛИЦЫ
 -- ============================================================
-
-CREATE TABLE service_categories (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    parent_id INTEGER DEFAULT NULL,
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    FOREIGN KEY (parent_id) REFERENCES service_categories(id) ON DELETE SET NULL
-);
-CREATE INDEX idx_service_categories_parent ON service_categories(parent_id);
-COMMENT ON TABLE service_categories IS 'Справочник категорий услуг';
-
-CREATE TABLE price_sections (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    section_name VARCHAR(200) NOT NULL,
-    min_price DECIMAL(12,2),
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_price_sections_active ON price_sections(is_active);
-CREATE TRIGGER trg_price_sections_updated_at
-BEFORE UPDATE ON price_sections FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE price_sections IS 'Разделы прайс-листа';
 
 CREATE TABLE uploads (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -88,91 +51,121 @@ CREATE TABLE uploads (
 CREATE INDEX idx_uploads_table_record ON uploads(table_name, record_id);
 COMMENT ON TABLE uploads IS 'Реестр загруженных файлов';
 
-INSERT INTO service_categories (name, parent_id, sort_order) VALUES
-('Пластическая хирургия', NULL, 1),
-('Косметология', NULL, 2),
-('Пластика лица', 1, 1),
-('Пластика груди', 1, 2),
-('Пластика тела', 1, 3),
-('Интимная пластика для мужчин', 1, 4),
-('Комбо-операции', 1, 5),
-('Другие услуги', 1, 6),
-('Аппаратная косметология', 2, 1),
-('Инъекционная косметология', 2, 2),
-('Уходы за лицом и телом', 2, 3),
-('Нитевой лифтинг', 2, 4);
-
-INSERT INTO price_sections (section_name, min_price, sort_order) VALUES
-('Пластическая и эстетическая хирургия', 3500.00, 1),
-('Дополнительные услуги', 3500.00, 2);
-
 
 -- ============================================================
 -- РАЗДЕЛ 1: УСЛУГИ (Services)
+--   service_sections     — разделы услуг
+--   service_subsections  — подразделы услуг (ссылка на раздел, название, фото)
+--   services             — услуги (ссылка на подраздел, название, описание)
+--   service_problems     — какие проблемы решает услуга
+--   service_types        — виды услуги (описание + 4 фото до/после)
+--   service_results      — результаты процедуры (2 фото до/после)
 -- ============================================================
 
-CREATE TABLE services (
+-- Раздел услуг
+CREATE TABLE service_sections (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    category_id INTEGER,
-    category VARCHAR(100) NOT NULL,
-    subcategory VARCHAR(150) NOT NULL,
-    service_name VARCHAR(255) NOT NULL,
-    description TEXT,
+    name VARCHAR(255) NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_service_sections_active ON service_sections(is_active);
+CREATE TRIGGER trg_service_sections_updated_at
+BEFORE UPDATE ON service_sections FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+COMMENT ON TABLE service_sections IS 'Разделы услуг';
+
+-- Подраздел услуг
+CREATE TABLE service_subsections (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    section_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
     photo_path VARCHAR(500),
     photo_alt VARCHAR(255),
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_service_subsections_section FOREIGN KEY (section_id) REFERENCES service_sections(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_service_subsections_section ON service_subsections(section_id);
+CREATE INDEX idx_service_subsections_active ON service_subsections(is_active);
+CREATE TRIGGER trg_service_subsections_updated_at
+BEFORE UPDATE ON service_subsections FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+COMMENT ON TABLE service_subsections IS 'Подразделы услуг: ссылка на раздел, название, фотография';
+
+-- Услуга
+CREATE TABLE services (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    subsection_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(200) UNIQUE,
+    description TEXT,
+    preparation TEXT,
+    execution TEXT,
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES service_categories(id) ON DELETE SET NULL
+    CONSTRAINT fk_services_subsection FOREIGN KEY (subsection_id) REFERENCES service_subsections(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_services_category ON services(category);
-CREATE INDEX idx_services_subcategory ON services(subcategory);
+CREATE INDEX idx_services_subsection ON services(subsection_id);
 CREATE INDEX idx_services_active ON services(is_active);
+CREATE INDEX idx_services_slug ON services(slug);
 CREATE TRIGGER trg_services_updated_at
 BEFORE UPDATE ON services FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE services IS 'Таблица услуг клиники';
+COMMENT ON TABLE services IS 'Услуги: ссылка на подраздел, название, описание, подготовка, выполнение';
+COMMENT ON COLUMN services.subsection_id IS 'Ссылка на подраздел услуги';
+COMMENT ON COLUMN services.description IS 'Описание процедуры';
+COMMENT ON COLUMN services.preparation IS 'Подготовка к операции';
+COMMENT ON COLUMN services.execution IS 'Способ выполнения';
 
-INSERT INTO services (category_id, category, subcategory, service_name, photo_path, sort_order) VALUES
-(3, 'Пластическая хирургия', 'Пластика лица', 'Блефаропластика', 'uploads/services/blefaroplastika.jpg', 1),
-(3, 'Пластическая хирургия', 'Пластика лица', 'Ринопластика', 'uploads/services/rinoplastika.jpg', 2),
-(3, 'Пластическая хирургия', 'Пластика лица', 'Спалопластика', 'uploads/services/spaloplastika.jpg', 3),
-(3, 'Пластическая хирургия', 'Пластика лица', 'Фейслифтинг', 'uploads/services/feislifting.jpg', 4),
-(3, 'Пластическая хирургия', 'Пластика лица', 'Подтяжка губ', 'uploads/services/podyazhka_gub.jpg', 5),
-(3, 'Пластическая хирургия', 'Пластика лица', 'Контурный лифтинг', 'uploads/services/konturniy_lifting.jpg', 6),
-(4, 'Пластическая хирургия', 'Пластика груди', 'Маммопластика', 'uploads/services/mammoplastika.jpg', 1),
-(4, 'Пластическая хирургия', 'Пластика груди', 'Липофилинг', 'uploads/services/lipofilling.jpg', 2),
-(5, 'Пластическая хирургия', 'Пластика тела', 'Абдоминопластика', 'uploads/services/abdominoplastika.jpg', 1),
-(5, 'Пластическая хирургия', 'Пластика тела', 'Бодилифтинг', 'uploads/services/bodilifting.jpg', 2),
-(5, 'Пластическая хирургия', 'Пластика тела', 'Липосакция', 'uploads/services/liposakciya.jpg', 3),
-(5, 'Пластическая хирургия', 'Пластика тела', 'Подтяжка бёдер', 'uploads/services/podyazhka_beder.jpg', 4),
-(6, 'Пластическая хирургия', 'Интимная пластика для мужчин', 'Интимная пластика для мужчин', 'uploads/services/intimnaya_plastika_muzhchin.jpg', 1),
-(7, 'Пластическая хирургия', 'Комбо-операции', 'Риносептопластика + Абдоминопластика + Липосакция', 'uploads/services/kombo_rino_abdo_lipo.jpg', 1),
-(7, 'Пластическая хирургия', 'Комбо-операции', 'Маммопластика + Абдоминопластика', 'uploads/services/kombo_mammo_abdo.jpg', 2),
-(7, 'Пластическая хирургия', 'Комбо-операции', 'Риносептопластика + Ринопластика', 'uploads/services/kombo_rino_rino.jpg', 3),
-(7, 'Пластическая хирургия', 'Комбо-операции', 'Контуропластика + Блефаропластика', 'uploads/services/kombo_kontur_blef.jpg', 4),
-(7, 'Пластическая хирургия', 'Комбо-операции', 'Блефаропластика + Липосакция живота и боков + Липофилинг груди', 'uploads/services/kombo_blef_lipo_lipo.jpg', 5),
-(8, 'Пластическая хирургия', 'Другие услуги', 'Обследование перед операцией', 'uploads/services/obsledovanie.jpg', 1),
-(8, 'Пластическая хирургия', 'Другие услуги', 'Подготовка к операции', 'uploads/services/podgotovka.jpg', 2),
-(8, 'Пластическая хирургия', 'Другие услуги', 'Палата пациента перед операцией', 'uploads/services/palata.jpg', 3),
-(8, 'Пластическая хирургия', 'Другие услуги', 'Программа реабилитации после операции', 'uploads/services/reabilitaciya.jpg', 4),
-(8, 'Пластическая хирургия', 'Другие услуги', 'Гендерная пластика', 'uploads/services/gendernaya.jpg', 5),
-(9, 'Косметология', 'Аппаратная косметология', 'Лазерное омоложение', 'uploads/services/lazernoe_omolozhenie.jpg', 1),
-(9, 'Косметология', 'Аппаратная косметология', 'Лазерная шлифовка', 'uploads/services/lazernaya_shlifovka.jpg', 2),
-(9, 'Косметология', 'Аппаратная косметология', 'Фототерапия', 'uploads/services/fototerapiya.jpg', 3),
-(9, 'Косметология', 'Аппаратная косметология', 'Лазерная система Fotona SP Dynamic', 'uploads/services/fotona_sp_dynamic.jpg', 4),
-(10, 'Косметология', 'Инъекционная косметология', 'Ботокс/Диспорт', 'uploads/services/botox_disport.jpg', 1),
-(10, 'Косметология', 'Инъекционная косметология', 'Биоревитализация', 'uploads/services/biorevitalizaciya.jpg', 2),
-(10, 'Косметология', 'Инъекционная косметология', 'Мезотерапия', 'uploads/services/mezoterapiya.jpg', 3),
-(10, 'Косметология', 'Инъекционная косметология', 'Контурная пластика', 'uploads/services/konturnaya_plastika.jpg', 4),
-(10, 'Косметология', 'Инъекционная косметология', 'Плацентарная терапия', 'uploads/services/placentarnaya.jpg', 5),
-(11, 'Косметология', 'Уходы за лицом и телом', 'Чистка', 'uploads/services/chistka.jpg', 1),
-(11, 'Косметология', 'Уходы за лицом и телом', 'Уходовая косметика', 'uploads/services/uhodovaya_kosmetika.jpg', 2),
-(11, 'Косметология', 'Уходы за лицом и телом', 'Пилинг', 'uploads/services/piling.jpg', 3),
-(11, 'Косметология', 'Уходы за лицом и телом', 'Массаж лица и тела', 'uploads/services/massazh.jpg', 4),
-(12, 'Косметология', 'Нитевой лифтинг', 'Итальянский нитевой лифтинг Happy Lift', 'uploads/services/happy_lift.jpg', 1),
-(12, 'Косметология', 'Нитевой лифтинг', 'Нити для подтяжки Grouse Trend', 'uploads/services/grouse_trend.jpg', 2);
+-- Проблемы, которые позволяет решить услуга
+CREATE TABLE service_problems (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    service_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_service_problems_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_service_problems_service ON service_problems(service_id);
+COMMENT ON TABLE service_problems IS 'Проблемы, которые позволяет решить услуга';
+COMMENT ON COLUMN service_problems.title IS 'Название проблемы';
+COMMENT ON COLUMN service_problems.description IS 'Текст с описанием проблемы';
 
+-- Виды услуги: описание + 4 фотографии (до/после, до/после)
+CREATE TABLE service_types (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    service_id INTEGER NOT NULL,
+    description TEXT,
+    photo_before_1_path VARCHAR(500),
+    photo_after_1_path VARCHAR(500),
+    photo_before_2_path VARCHAR(500),
+    photo_after_2_path VARCHAR(500),
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_service_types_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_service_types_service ON service_types(service_id);
+COMMENT ON TABLE service_types IS 'Виды услуги: описание и фотографии до/после (4 фото)';
+
+-- Результаты процедуры: 2 фотографии до и после
+CREATE TABLE service_results (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    service_id INTEGER NOT NULL,
+    photo_before_path VARCHAR(500),
+    photo_after_path VARCHAR(500),
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_service_results_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_service_results_service ON service_results(service_id);
+COMMENT ON TABLE service_results IS 'Результаты процедуры: фотографии до/после';
 
 -- ============================================================
 -- РАЗДЕЛ 2: АКЦИИ (Promotions)
@@ -181,39 +174,23 @@ INSERT INTO services (category_id, category, subcategory, service_name, photo_pa
 CREATE TABLE promotions (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
-    category VARCHAR(100),
-    description TEXT,
-    discount_percent INTEGER,
+    short_description TEXT,
+    full_description TEXT,
+    promotion_date DATE,
     photo_path VARCHAR(500),
     photo_alt VARCHAR(255),
-    start_date DATE,
-    end_date DATE,
+    slug VARCHAR(200) UNIQUE,
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_promotions_active ON promotions(is_active);
-CREATE INDEX idx_promotions_dates ON promotions(start_date, end_date);
+CREATE INDEX idx_promotions_date ON promotions(promotion_date);
+CREATE INDEX idx_promotions_slug ON promotions(slug);
 CREATE TRIGGER trg_promotions_updated_at
 BEFORE UPDATE ON promotions FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE promotions IS 'Таблица акций и специальных предложений';
-
-INSERT INTO promotions (title, category, description, discount_percent, photo_path, start_date, end_date) VALUES
-('Нитевой лифтинг "Лепесток" скидка 50%',
- 'Нитевой лифтинг',
- 'Освежить лицо, подчеркнуть красоту и вернуть коже упругость. Уникальная методика "Лепесток" — это авторская методика, позволяющая эффективно подтянуть среднюю и нижнюю треть лица.',
- 50,
- 'uploads/promotions/lepestok_50.jpg',
- '2025-04-07', '2025-12-31'),
-
-('PURE MOLECULE — инновационная технология омоложения',
- 'МОЛЕКУЛА',
- 'МОЛЕКУЛА — программа комплексного омоложения организма, уникальная разработка европейских врачей-косметологов.',
- NULL,
- 'uploads/promotions/pure_molecule.jpg',
- '2025-04-07', '2025-12-31');
-
+COMMENT ON TABLE promotions IS 'Акции: название, краткое описание, дата, полный текст';
 
 -- ============================================================
 -- РАЗДЕЛ 3: ПРОЕКТЫ (Projects) + связанные таблицы
@@ -222,22 +199,21 @@ INSERT INTO promotions (title, category, description, discount_percent, photo_pa
 CREATE TABLE projects (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
+    slug VARCHAR(200) UNIQUE,
     description TEXT,
-    full_description TEXT,
-    context_description TEXT,
-    project_description TEXT,
-    seasons_count INTEGER,
-    participants_count INTEGER,
-    experts_count INTEGER,
-    winners_count INTEGER,
+    project_date DATE,
+    seasons_count INTEGER DEFAULT 0,
+    participants_count INTEGER DEFAULT 0,
+    experts_count INTEGER DEFAULT 0,
+    partners_count INTEGER DEFAULT 0,
     photo_path VARCHAR(500),
     photo_alt VARCHAR(255),
-    project_date DATE,
-    meta_title VARCHAR(255),
-    meta_description VARCHAR(500),
+    photo_2_path VARCHAR(500),
+    photo_2_alt VARCHAR(255),
+    photo_3_path VARCHAR(500),
+    photo_3_alt VARCHAR(255),
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
-    slug VARCHAR(200) UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -246,182 +222,156 @@ CREATE INDEX idx_projects_date ON projects(project_date);
 CREATE INDEX idx_projects_slug ON projects(slug);
 CREATE TRIGGER trg_projects_updated_at
 BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE projects IS 'Таблица проектов клиники';
+COMMENT ON TABLE projects IS 'Проекты клиники: название, краткое описание, дата, счётчики разделов и фотографии';
 
-CREATE TABLE project_partners (
+-- Большое описание проекта: два небольших описания
+CREATE TABLE project_details (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INTEGER NOT NULL,
-    partner_name VARCHAR(255) NOT NULL,
-    partner_description TEXT,
-    partner_logo_path VARCHAR(500),
-    partner_type VARCHAR(100),
+    context_description TEXT,
+    project_description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_project_details_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT uk_project_details_project UNIQUE (project_id)
+);
+CREATE INDEX idx_project_details_project ON project_details(project_id);
+CREATE TRIGGER trg_project_details_updated_at
+BEFORE UPDATE ON project_details FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+COMMENT ON TABLE project_details IS 'Большое описание проекта (два блока текста)';
+
+-- Сезоны проекта
+CREATE TABLE project_seasons (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    CONSTRAINT fk_project_seasons_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_project_seasons_project ON project_seasons(project_id);
+COMMENT ON TABLE project_seasons IS 'Сезоны проекта (название + описание)';
+
+-- Участники проекта
+CREATE TABLE project_participants (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_project_participants_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_project_participants_project ON project_participants(project_id);
+COMMENT ON TABLE project_participants IS 'Участники проекта (название + описание)';
+
+-- Эксперты проекта
+CREATE TABLE project_experts (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_project_experts_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_project_experts_project ON project_experts(project_id);
+COMMENT ON TABLE project_experts IS 'Эксперты проекта (название + описание)';
+
+-- Партнёры проекта
+CREATE TABLE project_partners (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_project_partners_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_project_partners_project ON project_partners(project_id);
+COMMENT ON TABLE project_partners IS 'Партнёры проекта (название + описание)';
 
+-- Форматы работ проекта
+CREATE TABLE project_work_formats (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    photo_path VARCHAR(500),
+    photo_alt VARCHAR(255),
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_project_work_formats_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_project_work_formats_project ON project_work_formats(project_id);
+COMMENT ON TABLE project_work_formats IS 'Форматы работ проекта (название, описание, фотография)';
+
+-- Этапы проекта
 CREATE TABLE project_stages (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INTEGER NOT NULL,
     stage_number INTEGER NOT NULL,
-    stage_name VARCHAR(500) NOT NULL,
-    stage_description TEXT,
+    description TEXT,
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    CONSTRAINT fk_project_stages_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_project_stages_project ON project_stages(project_id);
 CREATE INDEX idx_project_stages_number ON project_stages(stage_number);
-
-CREATE TABLE project_gallery (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INTEGER NOT NULL,
-    photo_path VARCHAR(500) NOT NULL,
-    photo_alt VARCHAR(255),
-    photo_caption VARCHAR(500),
-    photo_type VARCHAR(50) DEFAULT 'event',
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_project_gallery_project ON project_gallery(project_id);
-CREATE INDEX idx_project_gallery_type ON project_gallery(photo_type);
-
-CREATE TABLE project_team (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INTEGER NOT NULL,
-    full_name VARCHAR(255) NOT NULL,
-    role VARCHAR(255) NOT NULL,
-    role_category VARCHAR(100),
-    photo_path VARCHAR(500),
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_project_team_project ON project_team(project_id);
-CREATE INDEX idx_project_team_role ON project_team(role_category);
-
-INSERT INTO projects (title, description, photo_path, project_date, slug, sort_order) VALUES
-('Социальный проект «Красота в тебе»',
- '«Красота в тебе» — социальный проект для жителей Челябинской области, которые хотят преобразиться, доверив своё преображение лучшим специалистам. Проект имеет международный статус, так как в проекте участвует итальянский пластический хирург Dr. Ivan Gaja.',
- 'uploads/projects/krasota_v_tebe.jpg',
- '2025-04-07', 'krasota-v-tebe', 1),
-('Доступная пластическая хирургия из Милана в России',
- 'В Челябинске на протяжении многих лет успешно реализуется Российско-Итальянский проект «Доступная пластическая хирургия из Милана в России». Сертифицированный пластический хирург с правом оперирования на территории нашей страны Dr.Gaja внедряет авторские методики: нитевой лифтинг, мезоботокс.',
- 'uploads/projects/milan_russia.jpg',
- '2025-04-07', 'milan-russia', 2),
-('Европейская блефаро-пластика 2025',
- '«Европейская блефаропластика» — комплексная программа омоложения верхнего века, в виде хирургической пластики верхнего века и 3-х сеансов реабилитации тканей на европейской лазерной системе Fotona.',
- 'uploads/projects/blefaroplastika_2025.jpg',
- '2025-04-07', 'evropeyskaya-blefaroplastika-2025', 3);
-
-UPDATE projects SET
-    context_description = 'Проект «Красота в тебе» — это социальный проект для жительниц Челябинской области, которые хотят преобразиться, доверив своё преображение лучшим специалистам. Проект имеет международный статус, так как в нём участвует итальянский пластический хирург Dr. Ivan Gaja. Проект реализуется при поддержке Правительства Челябинской области и клиники «Арт-Медика».',
-    project_description = '«Красота в тебе» — комплексная программа трансформации, включающая консультации ведущих специалистов, пластическую хирургию, работу со стилистами, психологами и имидж-консультантами. Каждая участница проходит путь от первого отбора до финального преображения на сцене.',
-    seasons_count = 11,
-    participants_count = 5026,
-    experts_count = 36,
-    winners_count = 67,
-    meta_title = 'Социальный проект «Красота в тебе» — Арт-Медика',
-    meta_description = 'Социальный проект для жительниц Челябинской области. 11 сезонов, 5026 участниц, 36 экспертов, 67 победителей.'
-WHERE id = 1;
-
-INSERT INTO project_partners (project_id, partner_name, partner_description, partner_logo_path, partner_type, sort_order) VALUES
-(1, 'Правительство Челябинской области', 'Официальный партнёр и поддержка проекта на региональном уровне.', 'uploads/projects/partners/government_chelyabinsk.jpg', 'Государственный', 1),
-(1, 'Женский клуб «Миротворица»', 'Общественная организация, поддерживающая женские инициативы.', 'uploads/projects/partners/mirotvoritsa.jpg', 'Общественный', 2),
-(1, 'Проект «Красота в тебе»', 'Социальный проект клиники «Арт-Медика» по комплексному преображению женщин.', 'uploads/projects/partners/krasota_v_tebe_logo.jpg', 'Коммерческий', 3);
-
-INSERT INTO project_stages (project_id, stage_number, stage_name, stage_description, sort_order) VALUES
-(1, 1, 'Отбор участниц', 'Первичный отбор кандидаток по заявкам.', 1),
-(1, 2, 'Работа с координатором', 'Индивидуальная работа с координатором проекта.', 2),
-(1, 3, 'Показы', 'Участие в показательных мероприятиях и дефиле.', 3),
-(1, 4, 'Представление у пластического хирурга', 'Консультация с пластическим хирургом Dr. Gaja.', 4),
-(1, 5, 'Финальные консультации с Dr. Gaja', 'Итоговые консультации перед операцией.', 5),
-(1, 6, 'Коррекция ухода и стилистики', 'Работа со стилистами и имидж-консультантами.', 6),
-(1, 7, 'Трансформация на сцене', 'Финальное преображение и выход на сцену.', 7),
-(1, 8, 'Награждение от партнёров', 'Вручение наград и подарков от партнёров проекта.', 8),
-(1, 9, 'Вручение сертификатов проекта «Красота в тебе»', 'Официальное вручение сертификатов участницам.', 9),
-(1, 10, 'Финал проекта', 'Завершающее мероприятие сезона.', 10);
-
-INSERT INTO project_gallery (project_id, photo_path, photo_alt, photo_caption, photo_type, sort_order) VALUES
-(1, 'uploads/projects/krasota_v_tebe/banner_main.jpg', 'Главный баннер', 'Социальный проект «Красота в тебе» — сезон 2025', 'banner', 1),
-(1, 'uploads/projects/krasota_v_tebe/event_01.jpg', 'Мероприятие', 'Церемония открытия сезона', 'event', 2),
-(1, 'uploads/projects/krasota_v_tebe/event_02.jpg', 'Участницы', 'Участницы на сцене', 'event', 3),
-(1, 'uploads/projects/krasota_v_tebe/event_03.jpg', 'Награждение', 'Вручение наград победительницам', 'event', 4),
-(1, 'uploads/projects/krasota_v_tebe/event_04.jpg', 'Команда', 'Команда специалистов проекта', 'event', 5),
-(1, 'uploads/projects/krasota_v_tebe/event_05.jpg', 'Dr. Gaja', 'Dr. Ivan Gaja — итальянский пластический хирург', 'event', 6);
-
-INSERT INTO project_team (project_id, full_name, role, role_category, photo_path, sort_order) VALUES
-(1, 'Dr. Ivan Gaja', 'Итальянский пластический хирург', 'Хирург', 'uploads/projects/team/dr_gaja.jpg', 1),
-(1, 'Мария Булычёва', 'Эксперт по пластической хирургии', 'Хирург', 'uploads/projects/team/bulycheva.jpg', 2),
-(1, 'Арт Найдёнов', 'Имиджевый стилист', 'Стилист', 'uploads/projects/team/naydenov.jpg', 3),
-(1, 'Галина Титова', 'Стилист по причёскам и макияжу', 'Стилист', 'uploads/projects/team/titova.jpg', 4),
-(1, 'Юлия Коршунова', 'Эксперт по стилю', 'Стилист', 'uploads/projects/team/korshunova.jpg', 5),
-(1, 'Арт Беляев', 'Имидж-консультант', 'Имидж-консультант', 'uploads/projects/team/belyaev.jpg', 6),
-(1, 'Людмила Демидова', 'Имидж-консультант', 'Имидж-консультант', 'uploads/projects/team/demidova.jpg', 7),
-(1, 'Анна Коновалова', 'Руководитель проекта', 'Координатор', 'uploads/projects/team/konovalova.jpg', 8),
-(1, 'Елена Иванова', 'Ведущий координатор', 'Координатор', 'uploads/projects/team/ivanova.jpg', 9),
-(1, 'Елена Соколова', 'Эксперт по психологии', 'Психолог', 'uploads/projects/team/sokolova.jpg', 10),
-(1, 'Анна Захарова', 'Психолог', 'Психолог', 'uploads/projects/team/zakharova.jpg', 11),
-(1, 'Ирина Голубева', 'Эксперт по костюмам и стилю', 'Стилист', 'uploads/projects/team/golubeva.jpg', 12);
-
+COMMENT ON TABLE project_stages IS 'Этапы проекта';
 
 -- ============================================================
--- РАЗДЕЛ 4: ЦЕНЫ НА УСЛУГИ (Service Prices)
+-- РАЗДЕЛ 4: ЦЕНЫ НА УСЛУГИ (Price Lists)
 -- ============================================================
 
+CREATE TABLE price_lists (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    price_from DECIMAL(12,2),
+    is_active BOOLEAN DEFAULT true,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_price_lists_name ON price_lists(name);
+CREATE TRIGGER trg_price_lists_updated_at
+BEFORE UPDATE ON price_lists FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
+COMMENT ON TABLE price_lists IS 'Цены на услуги';
+
+-- Категории цены на услуги
 CREATE TABLE service_prices (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    section_id INTEGER,
+    price_id INTEGER NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
     service_code VARCHAR(50),
     mics_code VARCHAR(20),
     service_name VARCHAR(500) NOT NULL,
     category VARCHAR(150),
     duration_min INTEGER,
+    price DECIMAL(12,2),
     price_category_1 DECIMAL(12,2),
     price_category_2 DECIMAL(12,2),
     price_category_3 DECIMAL(12,2),
     price_single DECIMAL(12,2),
-    price_note VARCHAR(255),
-    section_name VARCHAR(200),
-    section_min_price DECIMAL(12,2),
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (section_id) REFERENCES price_sections(id) ON DELETE SET NULL
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_service_prices_price ON service_prices(price_id);
 CREATE INDEX idx_service_prices_code ON service_prices(service_code);
 CREATE INDEX idx_service_prices_mics ON service_prices(mics_code);
 CREATE INDEX idx_service_prices_category ON service_prices(category);
-CREATE INDEX idx_service_prices_section ON service_prices(section_name);
 CREATE TRIGGER trg_service_prices_updated_at
 BEFORE UPDATE ON service_prices FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE service_prices IS 'Таблица цен на услуги';
-
-INSERT INTO service_prices (section_id, service_code, mics_code, service_name, duration_min, price_single, price_note, section_name, section_min_price, sort_order) VALUES
-(1, 'B01.057.003', '3.2.1', 'Первичная консультация пластического хирурга. Приём пациента, сбор анамнеза заболевания, объективный осмотр, определение необходимого объёма обследования, выбор концепции ведения и лечения пациента, разъяснение пациенту информации о заболевании, ведение медицинской документации.', 40, 2500.00, NULL, 'Пластическая и эстетическая хирургия', 3500.00, 1),
-(1, 'B01.057.004', '3.2.2', 'Повторная консультация пластического хирурга. Приём пациента, разъяснение пациенту информации о результатах обследования, объективный осмотр, краткое разъяснение пациенту информации о заболевании, возможных методах и этапах лечения.', 30, 2500.00, NULL, 'Пластическая и эстетическая хирургия', 3500.00, 2),
-(1, 'B01.057.004', '3.2.3', 'Осмотр после лечения в течение 1 месяца', 10, NULL, 'Бесплатно', 'Пластическая и эстетическая хирургия', 3500.00, 3);
-
-INSERT INTO service_prices (section_id, service_code, mics_code, service_name, category, duration_min, price_category_1, price_category_2, price_category_3, section_name, section_min_price, sort_order) VALUES
-(1, 'A16.20.085', '3.2.4.1', 'Увеличение молочной железы (маммопластика) (без стоимости имплантов)', 'МАММОПЛАСТИКА', 120, 112000.00, 137000.00, 147000.00, 'Пластическая и эстетическая хирургия', 3500.00, 10),
-(1, 'A16.20.085', '3.2.4.2', 'Увеличение молочной железы (маммопластика) с коррекцией ареол (без стоимости имплантов)', 'МАММОПЛАСТИКА', 90, 127000.00, 147000.00, 162000.00, 'Пластическая и эстетическая хирургия', 3500.00, 11),
-(1, 'A16.20.085', '3.2.4.3', 'Редукционная (уменьшение) пластика молочной железы', 'МАММОПЛАСТИКА', 120, 140000.00, 165000.00, 240000.00, 'Пластическая и эстетическая хирургия', 3500.00, 12),
-(1, 'A16.20.085', '3.2.4.4', 'Вертикальная т-образная мастопексия (подтяжка молочной железы)', 'МАММОПЛАСТИКА', 120, 130000.00, 150000.00, 200000.00, 'Пластическая и эстетическая хирургия', 3500.00, 13),
-(1, 'A16.20.085', '3.2.4.5', 'Подтяжка с увеличением молочных желез (без стоимости имплантов)', 'МАММОПЛАСТИКА', 120, 142000.00, 162000.00, 182000.00, 'Пластическая и эстетическая хирургия', 3500.00, 14),
-(1, 'A16.30.008', '3.2.5.1', 'Мини-абдоминопластика', 'АБДОМИНОПЛАСТИКА', 90, 72000.00, 82000.00, 97000.00, 'Пластическая и эстетическая хирургия', 3500.00, 20),
-(1, 'A16.30.008', '3.2.5.2', 'Абдоминопластика', 'АБДОМИНОПЛАСТИКА', 120, 112000.00, 132000.00, 182000.00, 'Пластическая и эстетическая хирургия', 3500.00, 21),
-(1, 'A16.30.008', '3.2.5.3', 'Коррекция пупка (формирование пупка)', 'АБДОМИНОПЛАСТИКА', 60, 15000.00, 20000.00, 25000.00, 'Пластическая и эстетическая хирургия', 3500.00, 22),
-(1, 'A16.30.008', '3.2.5.4', 'Устранение грыжи белой линии живота', 'АБДОМИНОПЛАСТИКА', 60, 52000.00, 62000.00, 72000.00, 'Пластическая и эстетическая хирургия', 3500.00, 23),
-(1, 'A16.30.058', '3.2.6.1', 'Верхний бодилифт', 'БОДИЛИФТ', NULL, 182000.00, 212000.00, 262000.00, 'Пластическая и эстетическая хирургия', 3500.00, 30),
-(1, 'A16.30.058', '3.2.6.2', 'Торсопластика (бодилифт)', 'БОДИЛИФТ', NULL, 262000.00, 362000.00, 412000.00, 'Пластическая и эстетическая хирургия', 3500.00, 31);
-
+COMMENT ON TABLE service_prices IS 'Категории цены на услуги';
 
 -- ============================================================
 -- РАЗДЕЛ 5: НОВОСТИ (News)
@@ -430,49 +380,22 @@ INSERT INTO service_prices (section_id, service_code, mics_code, service_name, c
 CREATE TABLE news (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
-    subtitle VARCHAR(255),
     full_text TEXT,
-    category VARCHAR(100),
     photo_path VARCHAR(500),
     photo_alt VARCHAR(255),
     news_date DATE,
     is_active BOOLEAN DEFAULT true,
-    is_featured BOOLEAN DEFAULT false,
     sort_order INTEGER DEFAULT 0,
-    views_count INTEGER DEFAULT 0,
-    meta_title VARCHAR(255),
-    meta_description VARCHAR(500),
     slug VARCHAR(200) UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_news_active ON news(is_active);
 CREATE INDEX idx_news_date ON news(news_date);
-CREATE INDEX idx_news_category ON news(category);
-CREATE INDEX idx_news_featured ON news(is_featured);
+CREATE INDEX idx_news_slug ON news(slug);
 CREATE TRIGGER trg_news_updated_at
 BEFORE UPDATE ON news FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
-COMMENT ON TABLE news IS 'Таблица новостей клиники';
-
-INSERT INTO news (title, subtitle, full_text, category, photo_path, news_date, is_featured, slug, sort_order) VALUES
-('"Освежиться, но не болеть!" Пластический хирург Dr.Gaja о бьюти-трендах и операциях',
- 'Погоня за модой в пластической хирургии редко заканчивается хорошо.',
- 'Погоня за модой в пластической хирургии редко заканчивается хорошо. В индустрии красоты смена трендов происходит стремительно, а исправлять последствия неудачных операций приходится годами. В гостях у «Арт-Медика» — известный пластический хирург Dr.Gaja (Гаджимурад Хадисов), который рассказал, какие запросы пациентов уходят в прошлое, а на смену чему приходит вечная классика.' || E'\n\n' ||
- 'Сегодня в «Арт-Медика» состоялась закрытая лекция и серия консультаций с приглашённым экспертом — пластическим хирургом Dr.Gaja. Специалист с международным опытом поделился своим видением современных бьюти-трендов и предостерёг пациентов от рискованных экспериментов.' || E'\n\n' ||
- 'Главный тезис встречи: «Освежиться, но не болеть».' || E'\n\n' ||
- 'По мнению Dr.Gaja, эпоха кардинальных преобразований «до неузнаваемости» уходит. Пациенты всё чаще приходят не за изменением паспортных данных, а за естественным восстановлением утраченного объёма. В тренде — минимально инвазивные методики и щадящие операции, которые дают эффект хорошо отдохнувшего лица без «маски» и натяжения.' || E'\n\n' ||
- 'Что обсудили на встрече:' || E'\n' ||
- '1. Антитренды: Хирург категорически против больших объёмов гиалуроновой кислоты (утиные губы, неестественные скулы) и спорных подтяжек с эффектом «ветра в лицо».' || E'\n' ||
- '2. Золотой стандарт: Липофилинг (пересадка собственного жира) и эндоскопические методики, которые позволяют добиться омоложения через микро-доступы.' || E'\n' ||
- '3. Осторожность с «новинками»: Dr.Gaja призвал не бросаться на первые появившиеся «революционные» нити и лазеры. «Лучшее — проверенный врач хорошего», — отметил эксперт.' || E'\n\n' ||
- '«Пластическая операция должна быть настолько хороша, чтобы никто вокруг не догадался о вашем визите к хирургу. Задача доктора — освежить лицо, убрать усталость, восстановить гармонию, но не менять личность пациента. Только тогда результат будет радовать десятилетиями», — прокомментировал Dr.Gaja.' || E'\n\n' ||
- 'Dr.Gaja (Гаджимурад Хадисов) — практикующий пластический хирург, специалист по реконструктивным и омолаживающим операциям лица. «Арт-Медика» регулярно приглашает ведущих федеральных экспертов для обмена опытом и проведения показательных операций.',
- 'Косметология',
- 'uploads/news/dr_gaja_beauty_trends.jpg',
- '2025-04-11', true, 'dr-gaja-beauty-trends', 1),
-('Отзывы пациентов — наша гордость!', NULL, NULL, 'Косметология', 'uploads/news/otzyvy_pacientov.jpg', '2025-04-11', false, 'otzyvy-pacientov', 2),
-('Финал 4 сезона международного проекта "Красота в тебе"', NULL, NULL, 'Красота в тебе', 'uploads/news/krasota_v_tebe_final.jpg', '2025-03-12', false, 'krasota-v-tebe-final', 3);
-
+COMMENT ON TABLE news IS 'Новости клиники: фотография, название, дата, большое описание';
 
 -- ============================================================
 -- РАЗДЕЛ 6: СПЕЦИАЛИСТЫ (Specialists) + связанные таблицы
@@ -487,17 +410,13 @@ CREATE TABLE specialists (
     position VARCHAR(255) NOT NULL,
     short_description TEXT,
     description TEXT,
-    full_description TEXT,
-    full_biography TEXT,
-    achievements TEXT,
-    education_summary TEXT,
+    operations_result TEXT,
     experience_since INTEGER,
     experience_years INTEGER,
     operations_count INTEGER DEFAULT 0,
     positive_reviews_percent INTEGER DEFAULT 0,
     photo_path VARCHAR(500),
     photo_alt VARCHAR(255),
-    gallery_photo_paths JSON,
     email VARCHAR(255),
     phone VARCHAR(50),
     schedule TEXT,
@@ -507,7 +426,6 @@ CREATE TABLE specialists (
     slug VARCHAR(200) UNIQUE,
     meta_title VARCHAR(255),
     meta_description VARCHAR(500),
-    schema_markup JSON,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -519,39 +437,88 @@ CREATE TRIGGER trg_specialists_updated_at
 BEFORE UPDATE ON specialists FOR EACH ROW EXECUTE FUNCTION fn_update_updated_at();
 CREATE TRIGGER trg_specialists_experience_years
 BEFORE INSERT OR UPDATE ON specialists FOR EACH ROW EXECUTE FUNCTION fn_set_experience_years();
-COMMENT ON TABLE specialists IS 'Таблица специалистов клиники';
+COMMENT ON TABLE specialists IS 'Специалисты клиники: ФИО, фото, краткое описание';
 
-CREATE TABLE specialist_directions (
+-- Стаж
+CREATE TABLE specialist_experience (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     specialist_id INTEGER NOT NULL,
-    direction_name VARCHAR(500) NOT NULL,
-    direction_category VARCHAR(100),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+    CONSTRAINT fk_specialist_experience_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_specialist_directions_specialist ON specialist_directions(specialist_id);
-CREATE INDEX idx_specialist_directions_category ON specialist_directions(direction_category);
+CREATE INDEX idx_specialist_experience_specialist ON specialist_experience(specialist_id);
+COMMENT ON TABLE specialist_experience IS 'Стаж специалиста (название + описание)';
 
+-- Операции за время работы в клинике
+CREATE TABLE specialist_operations (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    specialist_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_specialist_operations_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_specialist_operations_specialist ON specialist_operations(specialist_id);
+COMMENT ON TABLE specialist_operations IS 'Операции, выполненные в клинике (название + описание)';
+
+-- Положительные отзывы
+CREATE TABLE specialist_positive_reviews (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    specialist_id INTEGER NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_specialist_positive_reviews_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_specialist_positive_reviews_specialist ON specialist_positive_reviews(specialist_id);
+COMMENT ON TABLE specialist_positive_reviews IS 'Положительные отзывы (название + описание)';
+
+-- Направления деятельности = ссылки на услуги
+CREATE TABLE specialist_services (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    specialist_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
+    is_primary BOOLEAN DEFAULT false,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_specialist_services_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE,
+    CONSTRAINT fk_specialist_services_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
+    CONSTRAINT uk_specialist_service UNIQUE (specialist_id, service_id)
+);
+CREATE INDEX idx_specialist_services_specialist ON specialist_services(specialist_id);
+CREATE INDEX idx_specialist_services_service ON specialist_services(service_id);
+COMMENT ON TABLE specialist_services IS 'Связь специалиста и услуги (направления деятельности)';
+
+-- Образование
 CREATE TABLE specialist_education (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     specialist_id INTEGER NOT NULL,
-    education_type VARCHAR(100) NOT NULL,
+    education_level VARCHAR(100) NOT NULL,
     organization VARCHAR(500) NOT NULL,
-    year_obtained INTEGER NOT NULL,
+    year_issued INTEGER NOT NULL,
     qualification VARCHAR(255) NOT NULL,
     document_number VARCHAR(100),
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+    CONSTRAINT fk_specialist_education_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_specialist_education_specialist ON specialist_education(specialist_id);
-CREATE INDEX idx_specialist_education_type ON specialist_education(education_type);
-CREATE INDEX idx_specialist_education_year ON specialist_education(year_obtained);
+CREATE INDEX idx_specialist_education_level ON specialist_education(education_level);
+CREATE INDEX idx_specialist_education_year ON specialist_education(year_issued);
+COMMENT ON TABLE specialist_education IS 'Образование специалиста';
 
-CREATE TABLE specialist_certifications (
+-- Аккредитация
+CREATE TABLE specialist_accreditations (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     specialist_id INTEGER NOT NULL,
     document_type VARCHAR(100) NOT NULL,
@@ -561,394 +528,232 @@ CREATE TABLE specialist_certifications (
     expiry_date DATE NOT NULL,
     note VARCHAR(500),
     document_scan_path VARCHAR(500),
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_specialist_certs_specialist ON specialist_certifications(specialist_id);
-CREATE INDEX idx_specialist_certs_expiry ON specialist_certifications(expiry_date);
-CREATE INDEX idx_specialist_certs_specialty ON specialist_certifications(specialty);
-
-CREATE TABLE specialist_photos (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    specialist_id INTEGER NOT NULL,
-    photo_path VARCHAR(500) NOT NULL,
-    photo_alt VARCHAR(255),
-    photo_type VARCHAR(50) DEFAULT 'gallery',
     sort_order INTEGER DEFAULT 0,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
+    CONSTRAINT fk_specialist_accreditations_specialist FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_specialist_photos_specialist ON specialist_photos(specialist_id);
-CREATE INDEX idx_specialist_photos_type ON specialist_photos(photo_type);
-
-CREATE TABLE specialist_reviews (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    specialist_id INTEGER NOT NULL,
-    patient_name VARCHAR(255),
-    review_text TEXT NOT NULL,
-    rating SMALLINT DEFAULT 5,
-    review_date DATE,
-    is_verified BOOLEAN DEFAULT false,
-    is_active BOOLEAN DEFAULT true,
-    sort_order INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_specialist_reviews_specialist ON specialist_reviews(specialist_id);
-CREATE INDEX idx_specialist_reviews_rating ON specialist_reviews(rating);
-CREATE INDEX idx_specialist_reviews_active ON specialist_reviews(is_active);
-CREATE TRIGGER trg_reviews_percent_insert AFTER INSERT ON specialist_reviews FOR EACH ROW EXECUTE FUNCTION fn_recalc_reviews_percent();
-CREATE TRIGGER trg_reviews_percent_update AFTER UPDATE ON specialist_reviews FOR EACH ROW EXECUTE FUNCTION fn_recalc_reviews_percent();
-CREATE TRIGGER trg_reviews_percent_delete AFTER DELETE ON specialist_reviews FOR EACH ROW EXECUTE FUNCTION fn_recalc_reviews_percent();
-
-CREATE TABLE specialist_services (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    specialist_id INTEGER NOT NULL,
-    service_id INTEGER NOT NULL,
-    is_primary BOOLEAN DEFAULT false,
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE,
-    FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE,
-    CONSTRAINT uk_specialist_service UNIQUE (specialist_id, service_id)
-);
-CREATE INDEX idx_specialist_services_specialist ON specialist_services(specialist_id);
-CREATE INDEX idx_specialist_services_service ON specialist_services(service_id);
-
-CREATE TABLE specialist_achievements (
-    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    specialist_id INTEGER NOT NULL,
-    achievement_type VARCHAR(100),
-    title VARCHAR(500) NOT NULL,
-    description TEXT,
-    year INTEGER,
-    document_path VARCHAR(500),
-    sort_order INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (specialist_id) REFERENCES specialists(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_specialist_achievements_specialist ON specialist_achievements(specialist_id);
-CREATE INDEX idx_specialist_achievements_type ON specialist_achievements(achievement_type);
-CREATE INDEX idx_specialist_achievements_year ON specialist_achievements(year);
-
-
--- ==================== ДАННЫЕ: Специалисты ====================
-
-INSERT INTO specialists (last_name, first_name, middle_name, full_name, position, short_description, description, experience_since, operations_count, positive_reviews_percent, photo_path, photo_alt, is_active, is_featured, sort_order, slug, meta_title, meta_description) VALUES
-('Сергеева', 'Евгения', 'Александровна', 'Сергеева Евгения Александровна', 'Заместитель директора по медицинской части', 'Заведующая стационарным отделением «Оториноларингологии и пластической хирургии», врач-эксперт по контролю качества медицинской помощи.', 'Заведующая стационарным отделением «Оториноларингологии и пластической хирургии», врач-эксперт по контролю качества медицинской помощи, временной нетрудоспособности, врач-организатор здравоохранения, врач оториноларинголог, фоноатр ООО «ММЦ «Арт-Медика», ведущий специалист по бесшумному лечению синуситов синус-катетеров ЯМИК, руководитель проекта «Межгородоспическое мероприятие в ринологии», врач-координатор российско-итальянского проекта «Доступная пластическая хирургия из Милана в России».', 2002, 34, 90, 'uploads/specialists/sergeeva_evgeniya.jpg', 'Сергеева Евгения Александровна — заместитель директора по медицинской части', true, true, 1, 'sergeeva-evgeniya-aleksandrovna', 'Сергеева Евгения Александровна — заместитель директора по медицинской части | Арт-Медика', 'Сергеева Евгения Александровна — врач оториноларинголог, фоноатр, заместитель директора по медицинской части клиники Арт-Медика.');
-
-INSERT INTO specialists (last_name, first_name, middle_name, full_name, position, short_description, description, experience_since, operations_count, positive_reviews_percent, photo_path, photo_alt, is_active, is_featured, sort_order, slug, meta_title, meta_description) VALUES
-('Кудряшова', 'Ирина', 'Сергеевна', 'Кудряшова Ирина Сергеевна', 'Врач-косметолог, дерматолог', 'Врач-косметолог, дерматолог. Специализируется на инъекционной и аппаратной косметологии, лечении заболеваний кожи.', 'Врач-косметолог, дерматолог. Специализируется на инъекционной и аппаратной косметологии, лечении заболеваний кожи. Проводит консультации по уходу за кожей, подбирает индивидуальные программы омоложения и лечения.', 2010, 0, 95, 'uploads/specialists/kudryashova_irina.jpg', 'Кудряшова Ирина Сергеевна — врач-косметолог, дерматолог', true, false, 2, 'kudryashova-irina-sergeevna', 'Кудряшова Ирина Сергеевна — врач-косметолог, дерматолог | Арт-Медика', 'Кудряшова Ирина Сергеевна — врач-косметолог, дерматолог клиники Арт-Медика. Инъекционная и аппаратная косметология, лечение заболеваний кожи.');
-
-INSERT INTO specialists (last_name, first_name, middle_name, full_name, position, short_description, description, experience_since, operations_count, positive_reviews_percent, photo_path, photo_alt, is_active, is_featured, sort_order, slug, meta_title, meta_description) VALUES
-('Братушина', 'Анастасия', 'Петровна', 'Братушина Анастасия Петровна', 'Врач-косметолог', 'Врач-косметолог. Специализируется на инъекционных методиках омоложения и коррекции эстетических недостатков.', 'Врач-косметолог. Специализируется на инъекционных методиках омоложения и коррекции эстетических недостатков. Проводит ботулинотерапию, контурную пластику, биоревитализацию.', 2015, 0, 92, 'uploads/specialists/bratushina_anastasiya.jpg', 'Братушина Анастасия Петровна — врач-косметолог', true, false, 3, 'bratushina-anastasiya-petrovna', 'Братушина Анастасия Петровна — врач-косметолог | Арт-Медика', 'Братушина Анастасия Петровна — врач-косметолог клиники Арт-Медика. Инъекционные методики омоложения, ботулинотерапия, контурная пластика.');
-
-INSERT INTO specialists (last_name, first_name, middle_name, full_name, position, short_description, description, experience_since, operations_count, positive_reviews_percent, photo_path, photo_alt, is_active, is_featured, sort_order, slug, meta_title, meta_description) VALUES
-('Первозванский', 'Юрий', 'Юрьевич', 'Первозванский Юрий Юрьевич', 'Пластический хирург', 'Пластический хирург. Специализируется на эстетической и реконструктивной пластической хирургии лица и тела.', 'Пластический хирург. Специализируется на эстетической и реконструктивной пластической хирургии лица и тела. Проводит блефаропластику, ринопластику, маммопластику, абдоминопластику.', 2005, 156, 94, 'uploads/specialists/pervozvanskiy_yuriy.jpg', 'Первозванский Юрий Юрьевич — пластический хирург', true, true, 4, 'pervozvanskiy-yuriy-yuryevich', 'Первозванский Юрий Юрьевич — пластический хирург | Арт-Медика', 'Первозванский Юрий Юрьевич — пластический хирург клиники Арт-Медика. Эстетическая и реконструктивная пластическая хирургия лица и тела.');
-
-
--- ==================== Направления деятельности ====================
-
-INSERT INTO specialist_directions (specialist_id, direction_name, direction_category, sort_order) VALUES
-(1, 'Диагностика, профилактика и консервативное лечение заболеваний ЛОР-органов у детей и взрослых', 'Диагностика и лечение', 1),
-(1, 'Отоскопия', 'Диагностика', 2),
-(1, 'Риноскопия', 'Диагностика', 3),
-(1, 'Ларингоскопия', 'Диагностика', 4),
-(1, 'Ультразвуковое исследование пазух носа с применением европейского оборудования высокого класса безопасности', 'Диагностика', 5),
-(1, 'Аппаратное лечение на аппарате «Квант», «ЛОРИТРОН», «ФОТОРОН»', 'Аппаратное лечение', 6),
-(1, 'Лазеротерапия', 'Аппаратное лечение', 7),
-(1, 'Криотерапия', 'Аппаратное лечение', 8),
-(1, 'Синус-катетерный прием по бесшумному лечению синуситов синус-катетеров ЯМИК, физиотерапия, по применению лекарственных препаратов в оториноларингологии', 'Лечение', 9),
-(2, 'Инъекционная косметология', 'Косметология', 1),
-(2, 'Аппаратная косметология', 'Косметология', 2),
-(2, 'Лечение акне и постакне', 'Дерматология', 3),
-(2, 'Лечение пигментации', 'Дерматология', 4),
-(2, 'Биоревитализация', 'Инъекционные методики', 5),
-(2, 'Ботулинотерапия', 'Инъекционные методики', 6),
-(2, 'Контурная пластика', 'Инъекционные методики', 7),
-(2, 'Мезотерапия', 'Инъекционные методики', 8),
-(2, 'Пилинги', 'Уходовые процедуры', 9),
-(2, 'Чистка лица', 'Уходовые процедуры', 10),
-(3, 'Ботулинотерапия', 'Инъекционные методики', 1),
-(3, 'Контурная пластика', 'Инъекционные методики', 2),
-(3, 'Биоревитализация', 'Инъекционные методики', 3),
-(3, 'Мезотерапия лица и тела', 'Инъекционные методики', 4),
-(3, 'Липолитики', 'Инъекционные методики', 5),
-(3, 'Нитевой лифтинг', 'Инъекционные методики', 6),
-(3, 'Плазмотерапия', 'Инъекционные методики', 7),
-(3, 'Уходовые процедуры', 'Уходовые процедуры', 8),
-(4, 'Блефаропластика', 'Пластическая хирургия', 1),
-(4, 'Ринопластика', 'Пластическая хирургия', 2),
-(4, 'Маммопластика', 'Пластическая хирургия', 3),
-(4, 'Абдоминопластика', 'Пластическая хирургия', 4),
-(4, 'Липосакция', 'Пластическая хирургия', 5),
-(4, 'Фейслифтинг', 'Пластическая хирургия', 6),
-(4, 'Отопластика', 'Пластическая хирургия', 7),
-(4, 'Реконструктивная хирургия', 'Пластическая хирургия', 8);
-
-
--- ==================== Образование ====================
-
-INSERT INTO specialist_education (specialist_id, education_type, organization, year_obtained, qualification, sort_order) VALUES
-(1, 'Высшее образование', 'Челябинская государственная медицинская академия', 2002, 'Врач, педиатрия', 1),
-(1, 'Интернатура', 'Государственное образовательное учреждение высшего профессионального образования «Челябинская государственная медицинская академия Министерства здравоохранения Российской Федерации»', 2003, 'Педиатрия', 2),
-(1, 'Профессиональная переподготовка', 'Государственное образовательное учреждение высшего профессионального образования «Челябинская государственная медицинская академия Министерства здравоохранения Российской Федерации»', 2003, 'Оториноларингология', 3),
-(1, 'Профессиональная переподготовка', 'Государственное бюджетное образовательное учреждение высшего профессионального образования «Челябинская государственная медицинская академия» Министерства здравоохранения и социального развития Российской Федерации', 2012, 'Организация здравоохранения и общественное здоровье', 4),
-(1, 'Сертификационный цикл', 'Общество с ограниченной ответственностью "Современный инновационный университет"', 2020, 'Оториноларингология', 5),
-(1, 'Сертификационный цикл', 'Общество с ограниченной ответственностью "Современный инновационный университет"', 2020, 'Организация здравоохранения и общественное здоровье', 6),
-(1, 'Повышение квалификации', 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "ЦЕНТР ПРОФЕССИОНАЛЬНОГО ОБРАЗОВАНИЯ"', 2025, 'Оториноларингология', 7),
-(2, 'Высшее образование', 'Челябинская государственная медицинская академия', 2010, 'Врач, лечебное дело', 1),
-(2, 'Интернатура', 'Челябинская государственная медицинская академия', 2011, 'Дерматовенерология', 2),
-(2, 'Профессиональная переподготовка', 'Челябинская государственная медицинская академия', 2012, 'Косметология', 3),
-(2, 'Сертификационный цикл', 'Российская медицинская академия непрерывного профессионального образования', 2020, 'Косметология', 4),
-(2, 'Повышение квалификации', 'Российская медицинская академия непрерывного профессионального образования', 2023, 'Инъекционная косметология', 5),
-(3, 'Высшее образование', 'Южно-Уральский государственный медицинский университет', 2015, 'Врач, лечебное дело', 1),
-(3, 'Интернатура', 'Южно-Уральский государственный медицинский университет', 2016, 'Дерматовенерология', 2),
-(3, 'Профессиональная переподготовка', 'Южно-Уральский государственный медицинский университет', 2017, 'Косметология', 3),
-(3, 'Сертификационный цикл', 'Российская медицинская академия непрерывного профессионального образования', 2021, 'Косметология', 4),
-(3, 'Повышение квалификации', 'Российская медицинская академия непрерывного профессионального образования', 2024, 'Инъекционные методики в косметологии', 5),
-(4, 'Высшее образование', 'Челябинская государственная медицинская академия', 2005, 'Врач, хирургия', 1),
-(4, 'Интернатура', 'Челябинская государственная медицинская академия', 2006, 'Хирургия', 2),
-(4, 'Ординатура', 'Челябинская государственная медицинская академия', 2008, 'Пластическая хирургия', 3),
-(4, 'Профессиональная переподготовка', 'Российская медицинская академия непрерывного профессионального образования', 2010, 'Пластическая хирургия', 4),
-(4, 'Сертификационный цикл', 'Российская медицинская академия непрерывного профессионального образования', 2020, 'Пластическая хирургия', 5),
-(4, 'Повышение квалификации', 'Российская медицинская академия непрерывного профессионального образования', 2023, 'Эстетическая хирургия лица', 6);
-
-
--- ==================== Аккредитация / Сертификация ====================
-
-INSERT INTO specialist_certifications (specialist_id, document_type, specialty, position_title, issue_date, expiry_date, note) VALUES
-(1, 'Сертификат', 'Оториноларингология', 'Врач-оториноларинголог', '2020-11-17', '2025-11-17', 'Пролонгирован по приказу до 31.12.2026'),
-(1, 'Сертификат', 'Организация здравоохранения и общественное здоровье', 'Специалист в области организации здравоохранения и общественного здоровья', '2020-10-20', '2025-10-20', 'Пролонгирован по приказу до 31.12.2026'),
-(2, 'Сертификат', 'Косметология', 'Врач-косметолог', '2020-09-15', '2025-09-15', 'Пролонгирован по приказу до 31.12.2026'),
-(2, 'Сертификат', 'Дерматовенерология', 'Врач-дерматовенеролог', '2020-09-15', '2025-09-15', 'Пролонгирован по приказу до 31.12.2026'),
-(3, 'Сертификат', 'Косметология', 'Врач-косметолог', '2021-06-20', '2026-06-20', NULL),
-(3, 'Сертификат', 'Дерматовенерология', 'Врач-дерматовенеролог', '2021-06-20', '2026-06-20', NULL),
-(4, 'Сертификат', 'Пластическая хирургия', 'Врач-пластический хирург', '2020-11-10', '2025-11-10', 'Пролонгирован по приказу до 31.12.2026'),
-(4, 'Сертификат', 'Хирургия', 'Врач-хирург', '2020-11-10', '2025-11-10', 'Пролонгирован по приказу до 31.12.2026');
-
-
--- ==================== Отзывы ====================
-
-INSERT INTO specialist_reviews (specialist_id, patient_name, review_text, rating, review_date, is_verified) VALUES
-(1, 'Мария К.', 'Евгения Александровна — замечательный врач! Очень внимательная, всё объяснила, провела операцию на высшем уровне. Рекомендую!', 5, '2025-03-15', true),
-(1, 'Анна С.', 'Обратилась к Евгении Александровне по рекомендации. Очень довольна результатом и отношением. Профессионал своего дела!', 5, '2025-02-20', true),
-(1, 'Ольга В.', 'Прекрасный специалист! Операция прошла успешно, восстановление было быстрым. Спасибо огромное!', 5, '2025-01-10', true),
-(2, 'Екатерина М.', 'Ирина Сергеевна — волшебница! После её процедур кожа просто сияет. Очень довольна!', 5, '2025-04-01', true),
-(2, 'Татьяна Л.', 'Хожу к Ирине Сергеевне уже год. Результаты потрясающие. Очень грамотный подход!', 5, '2025-03-20', true),
-(2, 'Наталья Р.', 'Отличный врач! Всё подробно объяснила, подобрала идеальную программу ухода.', 5, '2025-02-15', true),
-(4, 'Светлана П.', 'Юрий Юрьевич — настоящий профессионал! Блефаропластика прошла идеально. Результат превзошёл ожидания!', 5, '2025-03-25', true),
-(4, 'Ирина Д.', 'Очень боялась операции, но Юрий Юрьевич всё объяснил, успокоил. Результатом очень довольна!', 5, '2025-02-10', true),
-(4, 'Людмила К.', 'Замечательный хирург! Руки золотые. Рекомендую всем!', 5, '2025-01-20', true);
-
-
--- ==================== Достижения ====================
-
-INSERT INTO specialist_achievements (specialist_id, achievement_type, title, description, year, sort_order) VALUES
-(1, 'Руководство проектом', 'Руководитель проекта «Межгородоспическое мероприятие в ринологии»', 'Организация и проведение международного мероприятия', 2023, 1),
-(1, 'Координация', 'Врач-координатор российско-итальянского проекта «Доступная пластическая хирургия из Милана в России»', 'Координация международного сотрудничества', 2022, 2),
-(1, 'Специализация', 'Ведущий специалист по бесшумному лечению синуситов синус-катетеров ЯМИК', 'Внедрение инновационной методики', 2020, 3),
-(4, 'Членство в ассоциации', 'Член Российского общества пластических реконструктивных и эстетических хирургов (РОПРЭХ)', 'Профессиональное сообщество', 2010, 1),
-(4, 'Участие в конференции', 'Докладчик на международной конференции по пластической хирургии', 'Выступление с докладом о современных методиках блефаропластики', 2023, 2),
-(4, 'Публикация', 'Автор научных публикаций по эстетической хирургии', 'Публикации в профессиональных журналах', 2022, 3);
-
+CREATE INDEX idx_specialist_accreditations_specialist ON specialist_accreditations(specialist_id);
+CREATE INDEX idx_specialist_accreditations_expiry ON specialist_accreditations(expiry_date);
+CREATE INDEX idx_specialist_accreditations_specialty ON specialist_accreditations(specialty);
+COMMENT ON TABLE specialist_accreditations IS 'Аккредитация и сертификация специалиста';
 
 -- ============================================================
--- ПРЕДСТАВЛЕНИЯ (VIEWS) — ИСПРАВЛЕННАЯ ВЕРСИЯ
+-- ПРЕДСТАВЛЕНИЯ (VIEWS)
 -- ============================================================
 
+-- Дерево услуг: раздел → подраздел → услуга
+CREATE OR REPLACE VIEW v_services_tree AS
+SELECT
+    sec.id AS section_id, sec.name AS section_name, sec.sort_order AS section_sort_order,
+    sub.id AS subsection_id, sub.name AS subsection_name, sub.photo_path AS subsection_photo_path,
+    s.id AS service_id, s.name AS service_name, s.slug, s.description, s.preparation, s.execution,
+    s.sort_order AS service_sort_order
+FROM service_sections sec
+JOIN service_subsections sub ON sub.section_id = sec.id
+JOIN services s ON s.subsection_id = sub.id
+WHERE sec.is_active = true AND sub.is_active = true AND s.is_active = true
+ORDER BY sec.sort_order, sec.id, sub.sort_order, sub.id, s.sort_order, s.id;
+
+-- Услуги вместе с ценами
 CREATE OR REPLACE VIEW v_services_with_prices AS
 SELECT
-    s.id, s.category, s.subcategory, s.service_name, s.photo_path,
+    s.id, s.name, s.slug, s.description, sub.photo_path,
     sp.service_code, sp.mics_code, sp.duration_min,
     sp.price_category_1, sp.price_category_2, sp.price_category_3,
-    sp.price_single, sp.price_note
+    sp.price_single
 FROM services s
-LEFT JOIN service_prices sp ON s.service_name = sp.service_name
+JOIN service_subsections sub ON sub.id = s.subsection_id
+LEFT JOIN service_prices sp ON s.name = sp.service_name
 WHERE s.is_active = true
-ORDER BY s.category, s.subcategory, s.sort_order;
+ORDER BY s.sort_order, s.id;
 
+-- Активные акции
 CREATE OR REPLACE VIEW v_active_promotions AS
-SELECT id, title, category, description, discount_percent, photo_path, start_date, end_date
+SELECT id, title, short_description, full_description, promotion_date, photo_path, slug
 FROM promotions
-WHERE is_active = true AND start_date <= CURRENT_DATE AND (end_date IS NULL OR end_date >= CURRENT_DATE)
-ORDER BY start_date DESC;
+WHERE is_active = true
+  AND (promotion_date IS NULL OR promotion_date <= CURRENT_DATE)
+ORDER BY promotion_date DESC, sort_order ASC;
 
+-- Прайс-лист
 CREATE OR REPLACE VIEW v_price_list AS
 SELECT
-    section_name, section_min_price, service_code, mics_code, service_name, category, duration_min,
-    COALESCE(price_single::text,
-        CONCAT(COALESCE(price_category_1, 0), ' / ', COALESCE(price_category_2, 0), ' / ', COALESCE(price_category_3, 0))
-    ) AS price_display,
-    price_note
-FROM service_prices
-WHERE is_active = true
-ORDER BY section_name, sort_order, mics_code;
+    pl.name AS price_name,
+    pl.name AS section_name,
+    sp.service_code, sp.mics_code, sp.service_name, sp.category, sp.duration_min,
+    COALESCE(sp.price_single::text,
+        CONCAT(COALESCE(sp.price_category_1, 0), ' / ', COALESCE(sp.price_category_2, 0), ' / ', COALESCE(sp.price_category_3, 0))
+    ) AS price_display
+FROM service_prices sp
+JOIN price_lists pl ON pl.id = sp.price_id
+WHERE sp.is_active = true AND pl.is_active = true
+ORDER BY pl.sort_order, pl.id, sp.sort_order, sp.mics_code;
 
+-- Последние новости
 CREATE OR REPLACE VIEW v_latest_news AS
-SELECT id, title, subtitle, category, photo_path, news_date, views_count
+SELECT id, title, photo_path, news_date
 FROM news
 WHERE is_active = true
 ORDER BY news_date DESC, sort_order DESC
 LIMIT 10;
 
--- Детальная страница проекта (ИСПРАВЛЕНО — ORDER BY во вложенном подзапросе)
+-- Детальная страница проекта
 CREATE OR REPLACE VIEW v_project_detail AS
 SELECT
-    p.id, p.title, p.description, p.full_description, p.context_description, p.project_description,
-    p.photo_path, p.project_date, p.meta_title, p.meta_description,
-    p.seasons_count, p.participants_count, p.experts_count, p.winners_count,
+    p.id, p.title, p.slug, p.description, p.project_date,
+    p.photo_path, p.photo_alt,
+    p.photo_2_path, p.photo_2_alt,
+    p.photo_3_path, p.photo_3_alt,
+    p.seasons_count, p.participants_count, p.experts_count, p.partners_count,
+    pd.context_description, pd.project_description,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT pp.partner_name AS name, pp.partner_description AS description,
-                pp.partner_logo_path AS logo, pp.partner_type AS type
+         SELECT ps.title AS title, ps.description AS description
+         FROM project_seasons ps
+         WHERE ps.project_id = p.id
+         ORDER BY ps.sort_order
+     ) t) AS seasons,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT pp.title AS title, pp.description AS description
+         FROM project_participants pp
+         WHERE pp.project_id = p.id
+         ORDER BY pp.sort_order
+     ) t) AS participants,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT pe.title AS title, pe.description AS description
+         FROM project_experts pe
+         WHERE pe.project_id = p.id
+         ORDER BY pe.sort_order
+     ) t) AS experts,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT pp.title AS title, pp.description AS description
          FROM project_partners pp
-         WHERE pp.project_id = p.id AND pp.is_active = true
+         WHERE pp.project_id = p.id
          ORDER BY pp.sort_order
      ) t) AS partners,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT ps.stage_number AS number, ps.stage_name AS name, ps.stage_description AS description
+         SELECT pw.title AS title, pw.description AS description, pw.photo_path AS photo
+         FROM project_work_formats pw
+         WHERE pw.project_id = p.id
+         ORDER BY pw.sort_order
+     ) t) AS work_formats,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT ps.stage_number AS number, ps.description AS description
          FROM project_stages ps
-         WHERE ps.project_id = p.id AND ps.is_active = true
-         ORDER BY ps.sort_order
+         WHERE ps.project_id = p.id
+         ORDER BY ps.stage_number
      ) t) AS stages,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT pg.photo_path AS path, pg.photo_alt AS alt,
-                pg.photo_caption AS caption, pg.photo_type AS type
-         FROM project_gallery pg
-         WHERE pg.project_id = p.id AND pg.is_active = true
-         ORDER BY pg.sort_order
-     ) t) AS gallery,
-    (SELECT JSON_AGG(row_to_json(t))
-     FROM (
-         SELECT pt.full_name AS name, pt.role AS role,
-                pt.role_category AS category, pt.photo_path AS photo
-         FROM project_team pt
-         WHERE pt.project_id = p.id AND pt.is_active = true
-         ORDER BY pt.sort_order
-     ) t) AS team
-FROM projects p WHERE p.is_active = true;
+         SELECT photo.path AS path, photo.alt AS alt, NULL::varchar AS caption
+         FROM (VALUES
+             (p.photo_path, p.photo_alt),
+             (p.photo_2_path, p.photo_2_alt),
+             (p.photo_3_path, p.photo_3_alt)
+         ) AS photo(path, alt)
+         WHERE photo.path IS NOT NULL
+     ) t) AS photos
+FROM projects p
+LEFT JOIN project_details pd ON pd.project_id = p.id
+WHERE p.is_active = true;
 
+-- Статистика по проектам
 CREATE OR REPLACE VIEW v_projects_stats AS
 SELECT
-    p.id, p.title, p.seasons_count, p.participants_count, p.experts_count, p.winners_count,
-    (SELECT COUNT(*) FROM project_partners pp WHERE pp.project_id = p.id AND pp.is_active = true) AS partners_count,
-    (SELECT COUNT(*) FROM project_stages ps WHERE ps.project_id = p.id AND ps.is_active = true) AS stages_count,
-    (SELECT COUNT(*) FROM project_gallery pg WHERE pg.project_id = p.id AND pg.is_active = true) AS photos_count,
-    (SELECT COUNT(*) FROM project_team pt WHERE pt.project_id = p.id AND pt.is_active = true) AS team_count
+    p.id, p.title, p.project_date,
+    p.seasons_count,
+    p.participants_count,
+    p.experts_count,
+    p.partners_count,
+    (SELECT COUNT(*) FROM project_work_formats pw WHERE pw.project_id = p.id) AS work_formats_count,
+    (SELECT COUNT(*) FROM project_stages ps WHERE ps.project_id = p.id) AS stages_count,
+    (CASE WHEN p.photo_path IS NOT NULL THEN 1 ELSE 0 END +
+     CASE WHEN p.photo_2_path IS NOT NULL THEN 1 ELSE 0 END +
+     CASE WHEN p.photo_3_path IS NOT NULL THEN 1 ELSE 0 END) AS photos_count
 FROM projects p WHERE p.is_active = true ORDER BY p.project_date DESC;
 
--- Полная карточка специалиста (ИСПРАВЛЕНО)
+-- Полная карточка специалиста
 CREATE OR REPLACE VIEW v_specialist_full AS
 SELECT
     s.id, s.full_name, s.last_name, s.first_name, s.middle_name, s.position,
-    s.short_description, s.description, s.full_biography, s.achievements,
+    s.short_description, s.description, s.operations_result,
     s.experience_since, s.experience_years,
     s.operations_count, s.positive_reviews_percent,
     s.photo_path, s.photo_alt, s.slug, s.is_featured, s.meta_title, s.meta_description,
-    (SELECT STRING_AGG(se.education_type || ' — ' || se.qualification || ' (' || se.year_obtained || ')', '; ' ORDER BY se.sort_order)
-     FROM specialist_education se WHERE se.specialist_id = s.id AND se.is_active = true) AS education_summary,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT sd.direction_name AS name, sd.direction_category AS category
-         FROM specialist_directions sd
-         WHERE sd.specialist_id = s.id AND sd.is_active = true
-         ORDER BY sd.sort_order
-     ) t) AS directions,
+         SELECT se.title AS title, se.description AS description
+         FROM specialist_experience se
+         WHERE se.specialist_id = s.id AND se.is_active = true
+         ORDER BY se.sort_order
+     ) t) AS experience,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT se.education_type AS type, se.organization AS organization,
-                se.year_obtained AS year, se.qualification AS qualification
+         SELECT so.title AS title, so.description AS description
+         FROM specialist_operations so
+         WHERE so.specialist_id = s.id AND so.is_active = true
+         ORDER BY so.sort_order
+     ) t) AS operations,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT spr.title AS title, spr.description AS description
+         FROM specialist_positive_reviews spr
+         WHERE spr.specialist_id = s.id AND spr.is_active = true
+         ORDER BY spr.sort_order
+     ) t) AS positive_reviews,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT sv.id, sv.service_id, sv.is_primary, sv.sort_order,
+                sv2.name AS name, sv2.slug AS slug, sub.photo_path AS photo_path
+         FROM specialist_services sv
+         JOIN services sv2 ON sv2.id = sv.service_id
+         LEFT JOIN service_subsections sub ON sub.id = sv2.subsection_id
+         WHERE sv.specialist_id = s.id AND sv.is_active = true
+         ORDER BY sv.sort_order, sv.id
+     ) t) AS services,
+    (SELECT JSON_AGG(row_to_json(t))
+     FROM (
+         SELECT se.education_level AS level, se.organization AS organization,
+                se.year_issued AS year, se.qualification AS qualification
          FROM specialist_education se
          WHERE se.specialist_id = s.id AND se.is_active = true
          ORDER BY se.sort_order
      ) t) AS education,
     (SELECT JSON_AGG(row_to_json(t))
      FROM (
-         SELECT sc.document_type AS type, sc.specialty AS specialty,
-                sc.position_title AS position, sc.issue_date AS issue_date,
-                sc.expiry_date AS expiry_date, sc.note AS note
-         FROM specialist_certifications sc
-         WHERE sc.specialist_id = s.id AND sc.is_active = true
-         ORDER BY sc.expiry_date DESC
-     ) t) AS certifications,
-    (SELECT JSON_AGG(row_to_json(t))
-     FROM (
-         SELECT sa.achievement_type AS type, sa.title AS title,
-                sa.description AS description, sa.year AS year
-         FROM specialist_achievements sa
+         SELECT sa.document_type AS type, sa.specialty AS specialty,
+                sa.position_title AS position, sa.issue_date AS issue_date,
+                sa.expiry_date AS expiry_date, sa.note AS note
+         FROM specialist_accreditations sa
          WHERE sa.specialist_id = s.id AND sa.is_active = true
-         ORDER BY sa.sort_order
-     ) t) AS achievements_list,
-    (SELECT JSON_AGG(row_to_json(t))
-     FROM (
-         SELECT sr.patient_name AS patient, sr.review_text AS text,
-                sr.rating AS rating, sr.review_date AS date
-         FROM specialist_reviews sr
-         WHERE sr.specialist_id = s.id AND sr.is_active = true
-         ORDER BY sr.review_date DESC
-     ) t) AS reviews,
-    (SELECT COUNT(*) FROM specialist_reviews sr WHERE sr.specialist_id = s.id AND sr.is_active = true) AS reviews_count,
-    (SELECT AVG(sr.rating) FROM specialist_reviews sr WHERE sr.specialist_id = s.id AND sr.is_active = true) AS avg_rating,
-    (SELECT COUNT(*) FROM specialist_directions sd WHERE sd.specialist_id = s.id AND sd.is_active = true) AS directions_count,
-    (SELECT COUNT(*) FROM specialist_certifications sc WHERE sc.specialist_id = s.id AND sc.is_active = true) AS certifications_count,
-    (SELECT MIN(sc.expiry_date) FROM specialist_certifications sc WHERE sc.specialist_id = s.id AND sc.is_active = true) AS next_cert_expiry
+         ORDER BY sa.expiry_date DESC
+     ) t) AS accreditations,
+    (SELECT COUNT(*) FROM specialist_positive_reviews spr WHERE spr.specialist_id = s.id AND spr.is_active = true) AS reviews_count,
+    (SELECT MIN(sa.expiry_date) FROM specialist_accreditations sa WHERE sa.specialist_id = s.id AND sa.is_active = true) AS next_accreditation_expiry
 FROM specialists s WHERE s.is_active = true ORDER BY s.sort_order, s.last_name;
 
+-- Карточки специалистов
 CREATE OR REPLACE VIEW v_specialists_cards AS
 SELECT
     s.id, s.full_name, s.position, s.short_description, s.photo_path, s.photo_alt, s.slug,
     s.experience_since, s.experience_years,
     s.operations_count, s.positive_reviews_percent, s.is_featured,
-    (SELECT AVG(sr.rating) FROM specialist_reviews sr WHERE sr.specialist_id = s.id AND sr.is_active = true) AS avg_rating,
-    (SELECT COUNT(*) FROM specialist_reviews sr WHERE sr.specialist_id = s.id AND sr.is_active = true) AS reviews_count
+    (SELECT COUNT(*) FROM specialist_positive_reviews spr WHERE spr.specialist_id = s.id AND spr.is_active = true) AS reviews_count,
+    (SELECT COUNT(*) FROM specialist_services sv WHERE sv.specialist_id = s.id AND sv.is_active = true) AS services_count
 FROM specialists s WHERE s.is_active = true ORDER BY s.is_featured DESC, s.sort_order, s.last_name;
 
-CREATE OR REPLACE VIEW v_specialists_expiring_certs AS
+-- Истекающая аккредитация
+CREATE OR REPLACE VIEW v_specialists_expiring_accreditations AS
 SELECT
-    s.id, s.full_name, s.position, sc.specialty, sc.expiry_date, sc.note,
-    (sc.expiry_date - CURRENT_DATE)::integer AS days_until_expiry
+    s.id, s.full_name, s.position, sa.specialty, sa.expiry_date, sa.note,
+    (sa.expiry_date - CURRENT_DATE)::integer AS days_until_expiry
 FROM specialists s
-JOIN specialist_certifications sc ON s.id = sc.specialist_id
-WHERE s.is_active = true AND sc.is_active = true AND sc.expiry_date <= CURRENT_DATE + INTERVAL '180 days'
-ORDER BY sc.expiry_date ASC;
-
-CREATE OR REPLACE VIEW v_specialists_rating AS
-SELECT
-    s.id, s.full_name, s.position, s.photo_path, s.slug,
-    COUNT(sr.id) AS reviews_count,
-    ROUND(AVG(sr.rating)::numeric, 2) AS avg_rating,
-    SUM(CASE WHEN sr.rating = 5 THEN 1 ELSE 0 END) AS five_star_count,
-    SUM(CASE WHEN sr.rating >= 4 THEN 1 ELSE 0 END) AS positive_count,
-    ROUND((SUM(CASE WHEN sr.rating >= 4 THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(sr.id), 0) * 100), 1) AS positive_percent
-FROM specialists s
-LEFT JOIN specialist_reviews sr ON s.id = sr.specialist_id AND sr.is_active = true
-WHERE s.is_active = true
-GROUP BY s.id, s.full_name, s.position, s.photo_path, s.slug
-HAVING COUNT(sr.id) > 0
-ORDER BY avg_rating DESC, reviews_count DESC;
-
--- Команда проекта с группировкой по категориям ролей (ИСПРАВЛЕНО)
-CREATE OR REPLACE VIEW v_project_team_by_role AS
-SELECT
-    p.id AS project_id,
-    p.title AS project_title,
-    pt.role_category,
-    JSON_AGG(row_to_json(sub_t)) AS members
-FROM projects p
-JOIN (
-    SELECT pt2.project_id, pt2.role_category, pt2.full_name, pt2.role, pt2.photo_path
-    FROM project_team pt2
-    WHERE pt2.is_active = true
-    ORDER BY pt2.sort_order
-) pt ON p.id = pt.project_id,
-LATERAL (SELECT pt.full_name, pt.role, pt.photo_path) sub_t
-WHERE p.is_active = true
-GROUP BY p.id, p.title, pt.role_category
-ORDER BY p.sort_order, pt.role_category;
+JOIN specialist_accreditations sa ON s.id = sa.specialist_id
+WHERE s.is_active = true AND sa.is_active = true AND sa.expiry_date <= CURRENT_DATE + INTERVAL '180 days'
+ORDER BY sa.expiry_date ASC;

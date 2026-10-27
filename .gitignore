@@ -1,0 +1,46 @@
+# Зависимости
+node_modules/
+.pnp
+.pnp.js
+
+# Сборка Next.js / TypeScript
+my-app/.next/
+my-app/out/
+my-app/dist/
+my-app/.turbo/
+my-app/next-env.d.ts
+*.tsbuildinfo
+
+# Окружение и локальные настройки
+.env
+.env.*
+!.env.example
+
+# Логи
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# Кэши и временные файлы
+.cache/
+.temp/
+tmp/
+coverage/
+*.log
+
+# IDE и ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Vercel / Netlify
+.vercel
+.netlify
+
+# Файлы, загруженные пользователем, намеренно коммитятся в репозиторий:
+# server/uploads/ исключать НЕЛЬЗЯ — пути к ним хранятся в БД (chek.text, uploads).

@@ -5,25 +5,49 @@ const Admin = require('../controlers/ControllerAdmin.js');
 const Public = require('../controlers/ControllerPublic.js');
 const Upload = require('../controlers/ControllerUpload.js');
 const {
-  PriceSectionsCrud,
-  PricesCrud,
+  PriceListsCrud,
+  PriceCategoriesCrud,
+  ServiceSectionsCrud,
+  ServiceSubsectionsCrud,
   ServicesCrud,
-  ServiceCategoriesCrud,
+  ServiceProblems,
+  ServiceTypes,
+  ServiceResults,
+  ServiceProblemsAdmin,
+  ServiceTypesAdmin,
+  ServiceResultsAdmin,
+  ServiceSpecialists,
   PromotionsCrud,
   ProjectsCrud,
+  ProjectDetails,
+  ProjectSeasons,
+  ProjectParticipants,
+  ProjectExperts,
   ProjectPartners,
+  ProjectWorkFormats,
   ProjectStages,
-  ProjectGallery,
-  ProjectTeam,
+  FillProjectPartnersCount,
+  ProjectDetailsAdmin,
+  ProjectSeasonsAdmin,
+  ProjectParticipantsAdmin,
+  ProjectExpertsAdmin,
+  ProjectPartnersAdmin,
+  ProjectWorkFormatsAdmin,
+  ProjectStagesAdmin,
   NewsCrud,
   SpecialistsCrud,
-  SpecialistDirections,
-  SpecialistEducation,
-  SpecialistCertifications,
-  SpecialistPhotos,
-  SpecialistReviews,
+  SpecialistExperience,
+  SpecialistOperations,
+  SpecialistPositiveReviews,
   SpecialistServices,
-  SpecialistAchievements,
+  SpecialistEducation,
+  SpecialistAccreditations,
+  SpecialistExperienceAdmin,
+  SpecialistOperationsAdmin,
+  SpecialistPositiveReviewsAdmin,
+  SpecialistEducationAdmin,
+  SpecialistServicesAdmin,
+  SpecialistAccreditationsAdmin,
 } = require('../controlers/CrudControllers.js');
 const { requireAdmin } = require('../middleware/auth.js');
 
@@ -38,15 +62,16 @@ router.get('/admin/me', Admin.getAdmin);
 // ============================================================
 
 // Цены на услуги
-router.get('/priceSections', PriceSectionsCrud.list);
-router.get('/priceYslyga', PricesCrud.list);
-router.get('/priceYslyga/:id', PricesCrud.getOne);
+router.get('/priceYslyga', PriceCategoriesCrud.list);
+router.get('/priceYslyga/:id', PriceCategoriesCrud.getOne);
 
-// Услуги и категории
+// Услуги (разделы → подразделы → услуги)
+router.get('/serviceSections', ServiceSectionsCrud.list);
+router.get('/serviceSubsections', ServiceSubsectionsCrud.list);
 router.get('/services', ServicesCrud.list);
-router.get('/services/:id', ServicesCrud.getOne);
-router.get('/serviceCategories', ServiceCategoriesCrud.list);
-router.get('/serviceCategories/tree', Public.getServiceCategoriesTree);
+router.get('/services/tree', Public.getServicesTree);
+router.get('/services/:slug', Public.getServiceBySlug);
+router.get('/services/:id/detail', Public.getServiceDetail);
 
 // Акции
 router.get('/promotions', PromotionsCrud.list);
@@ -68,27 +93,41 @@ router.get('/specialists/:slug', Public.getSpecialistBySlug);
 router.get('/specialists/:id/detail', SpecialistsCrud.getOne);
 
 // ============================================================
-// АДМИН: РАЗДЕЛЫ ПРАЙС-ЛИСТА
-// ============================================================
-router.get('/admin/priceSections', requireAdmin, PriceSectionsCrud.list);
-router.get('/admin/priceSections/:id', requireAdmin, PriceSectionsCrud.getOne);
-router.post('/admin/priceSections', requireAdmin, PriceSectionsCrud.create);
-router.put('/admin/priceSections/:id', requireAdmin, PriceSectionsCrud.update);
-router.patch('/admin/priceSections/:id', requireAdmin, PriceSectionsCrud.patch);
-router.delete('/admin/priceSections/:id', requireAdmin, PriceSectionsCrud.remove);
-
-// ============================================================
 // АДМИН: ЦЕНЫ НА УСЛУГИ
 // ============================================================
-router.get('/admin/priceYslyga', requireAdmin, PricesCrud.list);
-router.get('/admin/priceYslyga/:id', requireAdmin, PricesCrud.getOne);
-router.post('/admin/priceYslyga', requireAdmin, PricesCrud.create);
-router.put('/admin/priceYslyga/:id', requireAdmin, PricesCrud.update);
-router.patch('/admin/priceYslyga/:id', requireAdmin, PricesCrud.patch);
-router.delete('/admin/priceYslyga/:id', requireAdmin, PricesCrud.remove);
+router.get('/admin/priceLists', requireAdmin, PriceListsCrud.list);
+router.get('/admin/priceLists/:id', requireAdmin, PriceListsCrud.getOne);
+router.post('/admin/priceLists', requireAdmin, PriceListsCrud.create);
+router.put('/admin/priceLists/:id', requireAdmin, PriceListsCrud.update);
+router.patch('/admin/priceLists/:id', requireAdmin, PriceListsCrud.patch);
+router.delete('/admin/priceLists/:id', requireAdmin, PriceListsCrud.remove);
+
+router.get('/admin/priceCategories', requireAdmin, PriceCategoriesCrud.list);
+router.get('/admin/priceCategories/:id', requireAdmin, PriceCategoriesCrud.getOne);
+router.post('/admin/priceCategories', requireAdmin, PriceCategoriesCrud.create);
+router.put('/admin/priceCategories/:id', requireAdmin, PriceCategoriesCrud.update);
+router.patch('/admin/priceCategories/:id', requireAdmin, PriceCategoriesCrud.patch);
+router.delete('/admin/priceCategories/:id', requireAdmin, PriceCategoriesCrud.remove);
 
 // ============================================================
-// АДМИН: УСЛУГИ И КАТЕГОРИИ
+// АДМИН: РАЗДЕЛЫ И ПОДРАЗДЕЛЫ УСЛУГ
+// ============================================================
+router.get('/admin/serviceSections', requireAdmin, ServiceSectionsCrud.list);
+router.get('/admin/serviceSections/:id', requireAdmin, ServiceSectionsCrud.getOne);
+router.post('/admin/serviceSections', requireAdmin, ServiceSectionsCrud.create);
+router.put('/admin/serviceSections/:id', requireAdmin, ServiceSectionsCrud.update);
+router.patch('/admin/serviceSections/:id', requireAdmin, ServiceSectionsCrud.patch);
+router.delete('/admin/serviceSections/:id', requireAdmin, ServiceSectionsCrud.remove);
+
+router.get('/admin/serviceSubsections', requireAdmin, ServiceSubsectionsCrud.list);
+router.get('/admin/serviceSubsections/:id', requireAdmin, ServiceSubsectionsCrud.getOne);
+router.post('/admin/serviceSubsections', requireAdmin, ServiceSubsectionsCrud.create);
+router.put('/admin/serviceSubsections/:id', requireAdmin, ServiceSubsectionsCrud.update);
+router.patch('/admin/serviceSubsections/:id', requireAdmin, ServiceSubsectionsCrud.patch);
+router.delete('/admin/serviceSubsections/:id', requireAdmin, ServiceSubsectionsCrud.remove);
+
+// ============================================================
+// АДМИН: УСЛУГИ + вложенные таблицы
 // ============================================================
 router.get('/admin/services', requireAdmin, ServicesCrud.list);
 router.get('/admin/services/:id', requireAdmin, ServicesCrud.getOne);
@@ -97,11 +136,41 @@ router.put('/admin/services/:id', requireAdmin, ServicesCrud.update);
 router.patch('/admin/services/:id', requireAdmin, ServicesCrud.patch);
 router.delete('/admin/services/:id', requireAdmin, ServicesCrud.remove);
 
-router.get('/admin/serviceCategories', requireAdmin, ServiceCategoriesCrud.list);
-router.post('/admin/serviceCategories', requireAdmin, ServiceCategoriesCrud.create);
-router.put('/admin/serviceCategories/:id', requireAdmin, ServiceCategoriesCrud.update);
-router.patch('/admin/serviceCategories/:id', requireAdmin, ServiceCategoriesCrud.patch);
-router.delete('/admin/serviceCategories/:id', requireAdmin, ServiceCategoriesCrud.remove);
+router.get('/admin/services/:id/problems', requireAdmin, ServiceProblems.list);
+router.post('/admin/services/:id/problems', requireAdmin, ServiceProblems.create);
+
+router.get('/admin/serviceProblems', requireAdmin, ServiceProblemsAdmin.list);
+router.get('/admin/serviceProblems/:id', requireAdmin, ServiceProblemsAdmin.getOne);
+router.post('/admin/serviceProblems', requireAdmin, ServiceProblemsAdmin.create);
+router.put('/admin/serviceProblems/:id', requireAdmin, ServiceProblemsAdmin.update);
+router.patch('/admin/serviceProblems/:id', requireAdmin, ServiceProblemsAdmin.patch);
+router.delete('/admin/serviceProblems/:id', requireAdmin, ServiceProblemsAdmin.remove);
+
+router.get('/admin/services/:id/types', requireAdmin, ServiceTypes.list);
+router.post('/admin/services/:id/types', requireAdmin, ServiceTypes.create);
+
+router.get('/admin/serviceTypes', requireAdmin, ServiceTypesAdmin.list);
+router.get('/admin/serviceTypes/:id', requireAdmin, ServiceTypesAdmin.getOne);
+router.post('/admin/serviceTypes', requireAdmin, ServiceTypesAdmin.create);
+router.put('/admin/serviceTypes/:id', requireAdmin, ServiceTypesAdmin.update);
+router.patch('/admin/serviceTypes/:id', requireAdmin, ServiceTypesAdmin.patch);
+router.delete('/admin/serviceTypes/:id', requireAdmin, ServiceTypesAdmin.remove);
+
+router.get('/admin/services/:id/results', requireAdmin, ServiceResults.list);
+router.post('/admin/services/:id/results', requireAdmin, ServiceResults.create);
+
+router.get('/admin/serviceResults', requireAdmin, ServiceResultsAdmin.list);
+router.get('/admin/serviceResults/:id', requireAdmin, ServiceResultsAdmin.getOne);
+router.post('/admin/serviceResults', requireAdmin, ServiceResultsAdmin.create);
+router.put('/admin/serviceResults/:id', requireAdmin, ServiceResultsAdmin.update);
+router.patch('/admin/serviceResults/:id', requireAdmin, ServiceResultsAdmin.patch);
+router.delete('/admin/serviceResults/:id', requireAdmin, ServiceResultsAdmin.remove);
+
+router.get('/admin/services/:id/specialists', requireAdmin, ServiceSpecialists.list);
+router.post('/admin/services/:id/specialists', requireAdmin, ServiceSpecialists.create);
+router.put('/admin/serviceServices/:id', requireAdmin, ServiceSpecialists.update);
+router.patch('/admin/serviceServices/:id', requireAdmin, ServiceSpecialists.patch);
+router.delete('/admin/serviceServices/:id', requireAdmin, ServiceSpecialists.remove);
 
 // ============================================================
 // АДМИН: АКЦИИ
@@ -122,30 +191,70 @@ router.post('/admin/projects', requireAdmin, ProjectsCrud.create);
 router.put('/admin/projects/:id', requireAdmin, ProjectsCrud.update);
 router.patch('/admin/projects/:id', requireAdmin, ProjectsCrud.patch);
 router.delete('/admin/projects/:id', requireAdmin, ProjectsCrud.remove);
+router.post('/admin/projects/:id/partners-count', requireAdmin, FillProjectPartnersCount);
+
+router.get('/admin/projects/:id/details', requireAdmin, ProjectDetails.list);
+router.post('/admin/projects/:id/details', requireAdmin, ProjectDetails.create);
+router.get('/admin/projectDetails', requireAdmin, ProjectDetailsAdmin.list);
+router.get('/admin/projectDetails/:id', requireAdmin, ProjectDetailsAdmin.getOne);
+router.post('/admin/projectDetails', requireAdmin, ProjectDetailsAdmin.create);
+router.put('/admin/projectDetails/:id', requireAdmin, ProjectDetailsAdmin.update);
+router.patch('/admin/projectDetails/:id', requireAdmin, ProjectDetailsAdmin.patch);
+router.delete('/admin/projectDetails/:id', requireAdmin, ProjectDetailsAdmin.remove);
+
+router.get('/admin/projects/:id/seasons', requireAdmin, ProjectSeasons.list);
+router.post('/admin/projects/:id/seasons', requireAdmin, ProjectSeasons.create);
+router.get('/admin/projectSeasons', requireAdmin, ProjectSeasonsAdmin.list);
+router.get('/admin/projectSeasons/:id', requireAdmin, ProjectSeasonsAdmin.getOne);
+router.post('/admin/projectSeasons', requireAdmin, ProjectSeasonsAdmin.create);
+router.put('/admin/projectSeasons/:id', requireAdmin, ProjectSeasonsAdmin.update);
+router.patch('/admin/projectSeasons/:id', requireAdmin, ProjectSeasonsAdmin.patch);
+router.delete('/admin/projectSeasons/:id', requireAdmin, ProjectSeasonsAdmin.remove);
+
+router.get('/admin/projects/:id/participants', requireAdmin, ProjectParticipants.list);
+router.post('/admin/projects/:id/participants', requireAdmin, ProjectParticipants.create);
+router.get('/admin/projectParticipants', requireAdmin, ProjectParticipantsAdmin.list);
+router.get('/admin/projectParticipants/:id', requireAdmin, ProjectParticipantsAdmin.getOne);
+router.post('/admin/projectParticipants', requireAdmin, ProjectParticipantsAdmin.create);
+router.put('/admin/projectParticipants/:id', requireAdmin, ProjectParticipantsAdmin.update);
+router.patch('/admin/projectParticipants/:id', requireAdmin, ProjectParticipantsAdmin.patch);
+router.delete('/admin/projectParticipants/:id', requireAdmin, ProjectParticipantsAdmin.remove);
+
+router.get('/admin/projects/:id/experts', requireAdmin, ProjectExperts.list);
+router.post('/admin/projects/:id/experts', requireAdmin, ProjectExperts.create);
+router.get('/admin/projectExperts', requireAdmin, ProjectExpertsAdmin.list);
+router.get('/admin/projectExperts/:id', requireAdmin, ProjectExpertsAdmin.getOne);
+router.post('/admin/projectExperts', requireAdmin, ProjectExpertsAdmin.create);
+router.put('/admin/projectExperts/:id', requireAdmin, ProjectExpertsAdmin.update);
+router.patch('/admin/projectExperts/:id', requireAdmin, ProjectExpertsAdmin.patch);
+router.delete('/admin/projectExperts/:id', requireAdmin, ProjectExpertsAdmin.remove);
 
 router.get('/admin/projects/:id/partners', requireAdmin, ProjectPartners.list);
 router.post('/admin/projects/:id/partners', requireAdmin, ProjectPartners.create);
-router.put('/admin/projectPartners/:id', requireAdmin, ProjectPartners.update);
-router.patch('/admin/projectPartners/:id', requireAdmin, ProjectPartners.patch);
-router.delete('/admin/projectPartners/:id', requireAdmin, ProjectPartners.remove);
+router.get('/admin/projectPartners', requireAdmin, ProjectPartnersAdmin.list);
+router.get('/admin/projectPartners/:id', requireAdmin, ProjectPartnersAdmin.getOne);
+router.post('/admin/projectPartners', requireAdmin, ProjectPartnersAdmin.create);
+router.put('/admin/projectPartners/:id', requireAdmin, ProjectPartnersAdmin.update);
+router.patch('/admin/projectPartners/:id', requireAdmin, ProjectPartnersAdmin.patch);
+router.delete('/admin/projectPartners/:id', requireAdmin, ProjectPartnersAdmin.remove);
+
+router.get('/admin/projects/:id/workFormats', requireAdmin, ProjectWorkFormats.list);
+router.post('/admin/projects/:id/workFormats', requireAdmin, ProjectWorkFormats.create);
+router.get('/admin/projectWorkFormats', requireAdmin, ProjectWorkFormatsAdmin.list);
+router.get('/admin/projectWorkFormats/:id', requireAdmin, ProjectWorkFormatsAdmin.getOne);
+router.post('/admin/projectWorkFormats', requireAdmin, ProjectWorkFormatsAdmin.create);
+router.put('/admin/projectWorkFormats/:id', requireAdmin, ProjectWorkFormatsAdmin.update);
+router.patch('/admin/projectWorkFormats/:id', requireAdmin, ProjectWorkFormatsAdmin.patch);
+router.delete('/admin/projectWorkFormats/:id', requireAdmin, ProjectWorkFormatsAdmin.remove);
 
 router.get('/admin/projects/:id/stages', requireAdmin, ProjectStages.list);
 router.post('/admin/projects/:id/stages', requireAdmin, ProjectStages.create);
-router.put('/admin/projectStages/:id', requireAdmin, ProjectStages.update);
-router.patch('/admin/projectStages/:id', requireAdmin, ProjectStages.patch);
-router.delete('/admin/projectStages/:id', requireAdmin, ProjectStages.remove);
-
-router.get('/admin/projects/:id/gallery', requireAdmin, ProjectGallery.list);
-router.post('/admin/projects/:id/gallery', requireAdmin, ProjectGallery.create);
-router.put('/admin/projectGallery/:id', requireAdmin, ProjectGallery.update);
-router.patch('/admin/projectGallery/:id', requireAdmin, ProjectGallery.patch);
-router.delete('/admin/projectGallery/:id', requireAdmin, ProjectGallery.remove);
-
-router.get('/admin/projects/:id/team', requireAdmin, ProjectTeam.list);
-router.post('/admin/projects/:id/team', requireAdmin, ProjectTeam.create);
-router.put('/admin/projectTeam/:id', requireAdmin, ProjectTeam.update);
-router.patch('/admin/projectTeam/:id', requireAdmin, ProjectTeam.patch);
-router.delete('/admin/projectTeam/:id', requireAdmin, ProjectTeam.remove);
+router.get('/admin/projectStages', requireAdmin, ProjectStagesAdmin.list);
+router.get('/admin/projectStages/:id', requireAdmin, ProjectStagesAdmin.getOne);
+router.post('/admin/projectStages', requireAdmin, ProjectStagesAdmin.create);
+router.put('/admin/projectStages/:id', requireAdmin, ProjectStagesAdmin.update);
+router.patch('/admin/projectStages/:id', requireAdmin, ProjectStagesAdmin.patch);
+router.delete('/admin/projectStages/:id', requireAdmin, ProjectStagesAdmin.remove);
 
 // ============================================================
 // АДМИН: НОВОСТИ
@@ -167,47 +276,59 @@ router.put('/admin/specialists/:id', requireAdmin, SpecialistsCrud.update);
 router.patch('/admin/specialists/:id', requireAdmin, SpecialistsCrud.patch);
 router.delete('/admin/specialists/:id', requireAdmin, SpecialistsCrud.remove);
 
-router.get('/admin/specialists/:id/directions', requireAdmin, SpecialistDirections.list);
-router.post('/admin/specialists/:id/directions', requireAdmin, SpecialistDirections.create);
-router.put('/admin/specialistDirections/:id', requireAdmin, SpecialistDirections.update);
-router.patch('/admin/specialistDirections/:id', requireAdmin, SpecialistDirections.patch);
-router.delete('/admin/specialistDirections/:id', requireAdmin, SpecialistDirections.remove);
+router.get('/admin/specialists/:id/experience', requireAdmin, SpecialistExperience.list);
+router.post('/admin/specialists/:id/experience', requireAdmin, SpecialistExperience.create);
+router.get('/admin/specialistExperience', requireAdmin, SpecialistExperienceAdmin.list);
+router.get('/admin/specialistExperience/:id', requireAdmin, SpecialistExperienceAdmin.getOne);
+router.post('/admin/specialistExperience', requireAdmin, SpecialistExperienceAdmin.create);
+router.put('/admin/specialistExperience/:id', requireAdmin, SpecialistExperienceAdmin.update);
+router.patch('/admin/specialistExperience/:id', requireAdmin, SpecialistExperienceAdmin.patch);
+router.delete('/admin/specialistExperience/:id', requireAdmin, SpecialistExperienceAdmin.remove);
 
-router.get('/admin/specialists/:id/education', requireAdmin, SpecialistEducation.list);
-router.post('/admin/specialists/:id/education', requireAdmin, SpecialistEducation.create);
-router.put('/admin/specialistEducation/:id', requireAdmin, SpecialistEducation.update);
-router.patch('/admin/specialistEducation/:id', requireAdmin, SpecialistEducation.patch);
-router.delete('/admin/specialistEducation/:id', requireAdmin, SpecialistEducation.remove);
+router.get('/admin/specialists/:id/operations', requireAdmin, SpecialistOperations.list);
+router.post('/admin/specialists/:id/operations', requireAdmin, SpecialistOperations.create);
+router.get('/admin/specialistOperations', requireAdmin, SpecialistOperationsAdmin.list);
+router.get('/admin/specialistOperations/:id', requireAdmin, SpecialistOperationsAdmin.getOne);
+router.post('/admin/specialistOperations', requireAdmin, SpecialistOperationsAdmin.create);
+router.put('/admin/specialistOperations/:id', requireAdmin, SpecialistOperationsAdmin.update);
+router.patch('/admin/specialistOperations/:id', requireAdmin, SpecialistOperationsAdmin.patch);
+router.delete('/admin/specialistOperations/:id', requireAdmin, SpecialistOperationsAdmin.remove);
 
-router.get('/admin/specialists/:id/certifications', requireAdmin, SpecialistCertifications.list);
-router.post('/admin/specialists/:id/certifications', requireAdmin, SpecialistCertifications.create);
-router.put('/admin/specialistCertifications/:id', requireAdmin, SpecialistCertifications.update);
-router.patch('/admin/specialistCertifications/:id', requireAdmin, SpecialistCertifications.patch);
-router.delete('/admin/specialistCertifications/:id', requireAdmin, SpecialistCertifications.remove);
-
-router.get('/admin/specialists/:id/photos', requireAdmin, SpecialistPhotos.list);
-router.post('/admin/specialists/:id/photos', requireAdmin, SpecialistPhotos.create);
-router.put('/admin/specialistPhotos/:id', requireAdmin, SpecialistPhotos.update);
-router.patch('/admin/specialistPhotos/:id', requireAdmin, SpecialistPhotos.patch);
-router.delete('/admin/specialistPhotos/:id', requireAdmin, SpecialistPhotos.remove);
-
-router.get('/admin/specialists/:id/reviews', requireAdmin, SpecialistReviews.list);
-router.post('/admin/specialists/:id/reviews', requireAdmin, SpecialistReviews.create);
-router.put('/admin/specialistReviews/:id', requireAdmin, SpecialistReviews.update);
-router.patch('/admin/specialistReviews/:id', requireAdmin, SpecialistReviews.patch);
-router.delete('/admin/specialistReviews/:id', requireAdmin, SpecialistReviews.remove);
+router.get('/admin/specialists/:id/positiveReviews', requireAdmin, SpecialistPositiveReviews.list);
+router.post('/admin/specialists/:id/positiveReviews', requireAdmin, SpecialistPositiveReviews.create);
+router.get('/admin/specialistPositiveReviews', requireAdmin, SpecialistPositiveReviewsAdmin.list);
+router.get('/admin/specialistPositiveReviews/:id', requireAdmin, SpecialistPositiveReviewsAdmin.getOne);
+router.post('/admin/specialistPositiveReviews', requireAdmin, SpecialistPositiveReviewsAdmin.create);
+router.put('/admin/specialistPositiveReviews/:id', requireAdmin, SpecialistPositiveReviewsAdmin.update);
+router.patch('/admin/specialistPositiveReviews/:id', requireAdmin, SpecialistPositiveReviewsAdmin.patch);
+router.delete('/admin/specialistPositiveReviews/:id', requireAdmin, SpecialistPositiveReviewsAdmin.remove);
 
 router.get('/admin/specialists/:id/services', requireAdmin, SpecialistServices.list);
 router.post('/admin/specialists/:id/services', requireAdmin, SpecialistServices.create);
-router.put('/admin/specialistServices/:id', requireAdmin, SpecialistServices.update);
-router.patch('/admin/specialistServices/:id', requireAdmin, SpecialistServices.patch);
-router.delete('/admin/specialistServices/:id', requireAdmin, SpecialistServices.remove);
+router.get('/admin/specialistServices', requireAdmin, SpecialistServicesAdmin.list);
+router.get('/admin/specialistServices/:id', requireAdmin, SpecialistServicesAdmin.getOne);
+router.post('/admin/specialistServices', requireAdmin, SpecialistServicesAdmin.create);
+router.put('/admin/specialistServices/:id', requireAdmin, SpecialistServicesAdmin.update);
+router.patch('/admin/specialistServices/:id', requireAdmin, SpecialistServicesAdmin.patch);
+router.delete('/admin/specialistServices/:id', requireAdmin, SpecialistServicesAdmin.remove);
 
-router.get('/admin/specialists/:id/achievements', requireAdmin, SpecialistAchievements.list);
-router.post('/admin/specialists/:id/achievements', requireAdmin, SpecialistAchievements.create);
-router.put('/admin/specialistAchievements/:id', requireAdmin, SpecialistAchievements.update);
-router.patch('/admin/specialistAchievements/:id', requireAdmin, SpecialistAchievements.patch);
-router.delete('/admin/specialistAchievements/:id', requireAdmin, SpecialistAchievements.remove);
+router.get('/admin/specialists/:id/education', requireAdmin, SpecialistEducation.list);
+router.post('/admin/specialists/:id/education', requireAdmin, SpecialistEducation.create);
+router.get('/admin/specialistEducation', requireAdmin, SpecialistEducationAdmin.list);
+router.get('/admin/specialistEducation/:id', requireAdmin, SpecialistEducationAdmin.getOne);
+router.post('/admin/specialistEducation', requireAdmin, SpecialistEducationAdmin.create);
+router.put('/admin/specialistEducation/:id', requireAdmin, SpecialistEducationAdmin.update);
+router.patch('/admin/specialistEducation/:id', requireAdmin, SpecialistEducationAdmin.patch);
+router.delete('/admin/specialistEducation/:id', requireAdmin, SpecialistEducationAdmin.remove);
+
+router.get('/admin/specialists/:id/accreditations', requireAdmin, SpecialistAccreditations.list);
+router.post('/admin/specialists/:id/accreditations', requireAdmin, SpecialistAccreditations.create);
+router.get('/admin/specialistAccreditations', requireAdmin, SpecialistAccreditationsAdmin.list);
+router.get('/admin/specialistAccreditations/:id', requireAdmin, SpecialistAccreditationsAdmin.getOne);
+router.post('/admin/specialistAccreditations', requireAdmin, SpecialistAccreditationsAdmin.create);
+router.put('/admin/specialistAccreditations/:id', requireAdmin, SpecialistAccreditationsAdmin.update);
+router.patch('/admin/specialistAccreditations/:id', requireAdmin, SpecialistAccreditationsAdmin.patch);
+router.delete('/admin/specialistAccreditations/:id', requireAdmin, SpecialistAccreditationsAdmin.remove);
 
 // ============================================================
 // АДМИН: ЗАГРУЗКА ФАЙЛОВ

@@ -30,6 +30,11 @@
   flex: 1 1 240px;
 }
 
+.sortSelect {
+  flex: 0 1 280px;
+  max-width: 100%;
+}
+
 .panel {
   padding: 20px;
   margin-bottom: 24px;
@@ -48,6 +53,10 @@
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.grid > * {
+  min-width: 0;
 }
 
 .gridWide {
@@ -138,7 +147,11 @@
 .table td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.table tbody tr {
+  height: 56px;
 }
 
 .table tr:hover td {
@@ -167,7 +180,23 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-height: 56px;
+  height: 120px;
   margin-bottom: -1px;
+}
+
+.rowActionsWithDetails {
+  gap: 16px;
+}
+
+.rowActionsChild {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  height: 120px;
+  margin-bottom: 0;
 }
 
 .rowActions button {
@@ -202,6 +231,26 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.fieldAction {
+  display: flex;
+  margin-top: 6px;
+}
+
+.fileHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thumb {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
 .muted {
@@ -304,6 +353,58 @@
 .navBtnActive {
   background: var(--primary);
   color: #fff;
+}
+
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navGroupBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+}
+
+.navGroupBtn:hover {
+  background: #eef2f6;
+}
+
+.navGroupBtnActive {
+  color: var(--primary);
+}
+
+.navChevron {
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+
+.navChevronOpen {
+  transform: rotate(180deg);
+}
+
+.navGroupItems {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 4px 12px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.navGroupItems .navBtn {
+  height: 34px;
+  font-size: 13px;
 }
 
 .navLogout {

@@ -263,6 +263,18 @@ function serializeRow(row) {
   return { ...row };
 }
 
+function resolveSort(sortOptions, sortKey, fallbackOrderBy) {
+  const options = Array.isArray(sortOptions) ? sortOptions : [];
+  const found = options.find((option) => option.key === sortKey);
+  if (found && found.orderBy) return { orderBy: found.orderBy, key: found.key };
+  return { orderBy: fallbackOrderBy, key: null };
+}
+
+function sortOptionsMeta(sortOptions) {
+  const options = Array.isArray(sortOptions) ? sortOptions : [];
+  return options.map((option) => ({ key: option.key, label: option.label }));
+}
+
 function createCrud({
   table,
   fields,
@@ -271,6 +283,7 @@ function createCrud({
   publicOrderBy = null,
   searchFields = [],
   listFilterFields = null,
+  sortOptions = [],
   beforeCreate = null,
   beforeUpdate = null,
 }) {
@@ -283,17 +296,24 @@ function createCrud({
       try {
         const { params, conditions } = readQueryFilters(req, filterFields, { searchFields });
         const { limit, offset } = readPagination(req);
+        const sort = resolveSort(sortOptions, req.query.sort, adminOrderBy);
 
         const where = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
         const total = await pool.query(`SELECT COUNT(*) AS total FROM ${table}${where}`, params);
 
         params.push(limit, offset);
         const rows = await pool.query(
-          `SELECT ${publicColumns} FROM ${table}${where} ORDER BY ${adminOrderBy} LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          `SELECT ${publicColumns} FROM ${table}${where} ORDER BY ${sort.orderBy} LIMIT $${params.length - 1} OFFSET $${params.length}`,
           params,
         );
 
-        ok(res, rows.rows.map(serializeRow), { count: Number(total.rows[0].total), limit, offset });
+        ok(res, rows.rows.map(serializeRow), {
+          count: Number(total.rows[0].total),
+          limit,
+          offset,
+          sort: sort.key,
+          sort_options: sortOptionsMeta(sortOptions),
+        });
       } catch (err) {
         serverError(res, err, `Ошибка при чтении списка «${table}»`);
       }
@@ -422,13 +442,20 @@ function createCrud({
   return CrudController;
 }
 
-function createChildCrud({ table, parentField, fields, orderBy = 'sort_order, id' }) {
+function createChildCrud({
+  table,
+  parentField,
+  fields,
+  orderBy = 'sort_order, id',
+  listColumns = '*',
+  sortOptions = [],
+}) {
   const fieldNames = fields.map((field) => field.name);
 
   class ChildCrudController {
-    static async listChildren(parentId) {
+    static async listChildren(parentId, order) {
       const { rows } = await pool.query(
-        `SELECT * FROM ${table} WHERE ${parentField} = $1 ORDER BY ${orderBy}`,
+        `SELECT ${listColumns} FROM ${table} WHERE ${parentField} = $1 ORDER BY ${order || orderBy}`,
         [parentId],
       );
       return rows.map(serializeRow);
@@ -439,8 +466,13 @@ function createChildCrud({ table, parentField, fields, orderBy = 'sort_order, id
         const parentId = parentIdParam(req, res);
         if (parentId === null) return;
 
-        const items = await ChildCrudController.listChildren(parentId);
-        ok(res, items, { count: items.length });
+        const sort = resolveSort(sortOptions, req.query.sort, orderBy);
+        const items = await ChildCrudController.listChildren(parentId, sort.orderBy);
+        ok(res, items, {
+          count: items.length,
+          sort: sort.key,
+          sort_options: sortOptionsMeta(sortOptions),
+        });
       } catch (err) {
         serverError(res, err, `Ошибка при чтении списка «${table}»`);
       }
