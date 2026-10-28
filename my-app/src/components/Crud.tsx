@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { uploadFile } from '@/lib/api';
-import styles from '@/app/dashboard.module.css';
+import styles from '@/app/admin/dashboard.module.css';
 
 export type Row = Record<string, unknown>;
 
