@@ -1,0 +1,133 @@
+/* Базовые стили страницы */
+.contacts-main {
+  width: 100%;
+  padding-left: 20rem;
+  padding-right: 20rem;
+  padding-top: 5rem;
+  padding-bottom: 5rem;
+  min-height: 100vh;
+  background-color: #f8fafc; /* bg-gray-50 */
+  color: #1e293b; /* text-slate-800 */
+  box-sizing: border-box;
+}
+
+/* Хлебные крошки */
+.breadcrumbs {
+  font-size: 0.875rem;
+  color: #94a3b8; /* text-slate-400 */
+  margin-bottom: 1rem;
+}
+.breadcrumbs-active {
+  color: #475569; /* text-slate-600 */
+  font-weight: 500;
+}
+
+/* Шапка страницы */
+.contacts-header {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+@media (min-width: 768px) {
+  .contacts-header {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+.contacts-title {
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+.contacts-subtitle {
+  color: #475569;
+  max-width: 36rem;
+  font-size: 1rem;
+  font-weight: 500;
+}
+@media (min-width: 768px) {
+  .contacts-subtitle {
+    text-align: right;
+  }
+}
+
+/* Обёртка карты */
+.map-wrapper {
+  width: 100%;
+  height: 400px;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  background-color: #ffffff;
+  margin-bottom: 1.5rem;
+}
+
+/* Сетки карточек */
+.grid-three-cols {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.grid-two-cols {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+@media (min-width: 768px) {
+  .grid-three-cols {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .grid-two-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Карточки */
+.contact-card {
+  padding: 1.5rem;
+  background-color: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+.card-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  color: #0f172a;
+}
+.card-text {
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: #475569;
+}
+.card-link {
+  font-weight: 600;
+  color: #1e293b;
+  text-decoration-line: none;
+}
+.card-link:hover {
+  text-decoration-line: underline;
+}
+.card-hint {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+.card-list {
+  font-size: 0.875rem;
+  color: #475569;
+}
+.card-list-item {
+  margin-bottom: 0.5rem;
+}
+.card-list-item:last-child {
+  margin-bottom: 0;
+}
+.break-word {
+  word-break: break-all;
+}

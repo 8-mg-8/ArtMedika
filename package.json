@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@yandex/ymaps3-types": "^1.0.21772363",
     "opencode-ai": "^1.19.5"
   }
 }
